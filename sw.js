@@ -1,5 +1,5 @@
 // Offline cache for Dispatch. Bump VERSION when shipping changes.
-const VERSION = "dispatch-v1";
+const VERSION = "dispatch-v2";
 const SHELL = ["./", "index.html", "content.js", "dispatch.js", "install.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-180.png", "icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {

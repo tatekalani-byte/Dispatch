@@ -10,7 +10,9 @@
   const TYPES = {
     rss: { label: "Website feed (RSS)", ph: "https://example.com/feed", help: "Most news sites and blogs have one. Try adding /feed or /rss to the site's address." },
     gnews: { label: "Keyword alert (Google News)", ph: "\"school board\" Ohio when:7d", help: "Any search. Use quotes for exact phrases, OR between options, and when:1d or when:7d for recent results only." },
-    reddit: { label: "Reddit community", ph: "Journalism", help: "The subreddit's name, without r/." },
+    substack: { label: "Substack newsletter", ph: "heathercoxrichardson", help: "The name before .substack.com, or the newsletter's own web address if it has one." },
+    reddit: { label: "Reddit community", ph: "Journalism", help: "The subreddit's name, without r/.", social: true },
+    redditsearch: { label: "Reddit search", ph: "\"public records\" police", help: "New posts anywhere on Reddit that match your words.", social: true },
     youtube: { label: "YouTube channel", ph: "UCxxxxxxxxxxxxxxxxxxxxxx", help: "The channel ID, which starts with UC. On the channel page: About, Share channel, Copy channel ID." },
     hn: { label: "Hacker News search", ph: "surveillance", help: "Recent Hacker News stories that match your words." },
     bsky: { label: "Bluesky account", ph: "apnews.com", help: "The account's handle, without the @.", social: true },
@@ -94,7 +96,7 @@
   }
   function fresh() {
     const s = {
-      v: 1, desks: [], sources: [],
+      v: 2, desks: [], sources: [],
       xSearches: window.DISPATCH_X_SEARCHES.map((x) => ({ id: uid(), label: x.label, q: x.q })),
       alerts: ["FOIA", "subpoena", "leaked", "whistleblower", "lawsuit"], mutes: [],
       read: {}, clips: [], pitches: [], contacts: [], drills: [], lessons: {}, days: {},
@@ -108,6 +110,8 @@
   let S = loadJSON(KEY);
   if (!S || !Array.isArray(S.sources)) S = fresh();
   S = Object.assign(fresh(), S, S.desks ? {} : { desks: [] });
+  // Version 2 added Substack newsletters and made Reddit part of Social.
+  if (S.v < 2) { ["substack", "community"].forEach((id) => addPack(S, id)); S.v = 2; }
   let C = loadJSON(CACHE_KEY) || {}; // sourceId -> { at, items, err }
 
   function save() {
@@ -145,7 +149,8 @@
   const looksLikeFeed = (t) => /<(rss|feed|rdf:RDF)[\s>]/i.test(t.slice(0, 6000));
   let proxyStart = 0;
 
-  async function getFeedText(url) {
+  async function getFeedText(url) { return getText(url, looksLikeFeed); }
+  async function getText(url, ok) {
     const tries = [];
     if (S.proxy) tries.push((u) => S.proxy.includes("{url}") ? S.proxy.replace("{url}", encodeURIComponent(u)) : S.proxy + encodeURIComponent(u));
     tries.push((u) => u);
@@ -153,7 +158,7 @@
     for (const make of tries) {
       try {
         const text = await timed(make(url));
-        if (looksLikeFeed(text)) {
+        if (ok(text)) {
           const pi = PROXIES.indexOf(make);
           if (pi >= 0) proxyStart = pi;
           return text;
@@ -267,6 +272,42 @@
     });
   }
 
+  // Reddit: JSON first (directly, then through the proxies), its RSS feed as a fallback.
+  function redditUrls(src) {
+    if (src.type === "redditsearch") {
+      const q = encodeURIComponent(src.value);
+      return ["https://www.reddit.com/search.json?sort=new&limit=30&raw_json=1&q=" + q, "https://www.reddit.com/search.rss?sort=new&q=" + q];
+    }
+    const sub = src.value.replace(/^\/?r\//i, "").replace(/\/$/, "").trim();
+    return ["https://www.reddit.com/r/" + sub + "/new.json?limit=30&raw_json=1", "https://www.reddit.com/r/" + sub + "/.rss"];
+  }
+  async function fetchReddit(src) {
+    const [json, rss] = redditUrls(src);
+    const text = await getText(json, (t) => /^\s*\{/.test(t) && t.includes('"children"'));
+    if (text) {
+      return JSON.parse(text).data.children.map((c) => c.data).filter((d) => d && d.title).map((d) => {
+        const img = d.preview && d.preview.images && d.preview.images[0];
+        const thumb = img ? (img.resolutions && img.resolutions[2] || img.resolutions && img.resolutions.slice(-1)[0] || img.source).url : "";
+        const external = !d.is_self && d.url && !/reddit\.com|redd\.it/.test(host(d.url));
+        return {
+          id: src.id + "|" + d.name, sid: src.id, kind: "post", link: "https://www.reddit.com" + d.permalink,
+          date: (d.created_utc || 0) * 1000, title: d.title, text: clip(d.selftext || "", 400),
+          author: "u/" + d.author, handle: d.subreddit_name_prefixed, avatar: "",
+          images: thumb && !external ? [thumb] : [],
+          card: external ? { url: d.url, title: "Linked story", desc: "" } : null,
+          stats: (d.score || 0) + " points · " + (d.num_comments || 0) + " comments", repostBy: "", net: "Reddit",
+        };
+      });
+    }
+    const feed = await getFeedText(rss);
+    if (!feed) throw new Error("Reddit didn't answer. It often blocks public proxies; a proxy of your own (see Settings) fixes that.");
+    return parseFeed(feed, src).map((a) => ({
+      id: a.id, sid: src.id, kind: "post", link: a.link, date: a.date, title: a.title, text: a.summary,
+      author: a.author ? a.author.replace(/^\/u\//, "u/") : "", handle: src.name, avatar: "", images: a.image ? [a.image] : [],
+      card: null, repostBy: "", net: "Reddit",
+    }));
+  }
+
   async function fetchMastodon(src) {
     const [tag, server] = src.value.replace(/^#/, "").split("@");
     if (!tag || !server) throw new Error("Write it as tag@server, like journalism@mastodon.social");
@@ -286,7 +327,12 @@
 
   function feedUrl(s) {
     if (s.type === "gnews") return "https://news.google.com/rss/search?q=" + encodeURIComponent(s.value) + "&hl=en-US&gl=US&ceid=US:en";
-    if (s.type === "reddit") return "https://www.reddit.com/r/" + s.value.replace(/^\/?r\//i, "").replace(/\/$/, "") + "/.rss";
+    if (s.type === "reddit" || s.type === "redditsearch") return redditUrls(s)[1];
+    if (s.type === "substack") {
+      const v = s.value.trim().replace(/\/+$/, "").replace(/\/feed$/, "");
+      if (/^https?:\/\//i.test(v)) return v + "/feed";
+      return /\./.test(v) ? "https://" + v + "/feed" : "https://" + v.replace(/^@/, "") + ".substack.com/feed";
+    }
     if (s.type === "youtube") return /^https?:/.test(s.value) ? s.value : "https://www.youtube.com/feeds/videos.xml?channel_id=" + s.value.trim();
     return s.value.trim();
   }
@@ -297,6 +343,7 @@
       if (src.type === "hn") items = await fetchHN(src);
       else if (src.type === "bsky") items = await fetchBsky(src);
       else if (src.type === "mastodon") items = await fetchMastodon(src);
+      else if (src.type === "reddit" || src.type === "redditsearch") items = await fetchReddit(src);
       else items = await fetchRss(src);
       C[src.id] = { at: Date.now(), items: items.slice(0, 40), err: "" };
     } catch (e) {
@@ -478,7 +525,7 @@
       <div class="label">Watch on X</div>
       <p class="small muted" style="margin:-2px 0 10px">X doesn't offer a free feed, so these open saved searches straight in X's Latest tab.</p>
       <div class="launch" id="x-list"></div>
-      <div class="label">Bluesky &amp; Mastodon</div>
+      <div class="label">Reddit, Bluesky &amp; Mastodon</div>
       <div class="chips" id="social-chips"></div>
       <div class="status" id="social-status"></div>
       <div class="stack" id="social-list"></div>`;
@@ -501,14 +548,16 @@
     const items = allItems(true).filter((it) => S.socialSrc === "all" || it.sid === S.socialSrc).slice(0, 150);
     if (!items.length) {
       list.innerHTML = srcs.length ? `<div class="empty"><h3>${refreshing ? "Loading posts…" : "No posts yet"}</h3></div>`
-        : `<div class="empty"><h3>Follow people and hashtags</h3><p>Add Bluesky accounts and Mastodon hashtags in Sources.</p><button class="btn primary" type="button" data-act="settings">${icon("plus")}Add sources</button></div>`;
+        : `<div class="empty"><h3>Follow people and hashtags</h3><p>Add subreddits, Reddit searches, Bluesky accounts and Mastodon hashtags in Sources.</p><button class="btn primary" type="button" data-act="settings">${icon("plus")}Add sources</button></div>`;
       return;
     }
     list.innerHTML = items.map((p) => `<article class="post" data-id="${esc(p.id)}">
       <div class="post-head">${p.avatar ? `<img class="avatar" src="${esc(p.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="avatar"></span>`}
         <div class="post-who"><b>${esc(p.author)}</b><span>${esc(p.handle)} · ${esc(p.net)} · ${ago(p.date)}${p.repostBy ? " · reposted" : ""}</span></div></div>
-      <div class="post-text">${highlight(p.text, p._alerts, "")}</div>
+      ${p.title ? `<a class="post-title" href="${esc(p.link)}" target="_blank" rel="noopener" data-open>${highlight(p.title, p._alerts, "")}</a>` : ""}
+      ${p.text ? `<div class="post-text${p.title ? " muted small" : ""}">${highlight(p.text, p._alerts, "")}</div>` : ""}
       ${p.images.length ? `<div class="post-imgs">${p.images.map((u) => `<img src="${esc(u)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join("")}</div>` : ""}
+      ${p.stats ? `<p class="small muted" style="margin:6px 0 0">${esc(p.stats)}</p>` : ""}
       ${p.card && p.card.url ? `<a class="post-link" href="${esc(p.card.url)}" target="_blank" rel="noopener"><b>${esc(p.card.title || host(p.card.url))}</b><span class="muted">${esc(host(p.card.url))}</span></a>` : ""}
       <div class="story-actions">
         <a class="act" href="${esc(p.link)}" target="_blank" rel="noopener" data-open>${icon("ext")}Open</a>
@@ -1030,7 +1079,7 @@
         const name = (F.deskName.value || "").trim() || "My desk";
         const d = { id: uid(), name }; S.desks.push(d); desk = d.id;
       }
-      const name = F.name.value.trim() || (type === "rss" ? host(value) : type === "reddit" ? "r/" + value.replace(/^\/?r\//i, "") : type === "mastodon" ? "#" + value.replace(/^#/, "").split("@")[0] : value);
+      const name = F.name.value.trim() || (type === "rss" ? host(value) : type === "reddit" ? "r/" + value.replace(/^\/?r\//i, "") : type === "redditsearch" ? "Reddit: " + value : type === "substack" ? (/\./.test(value) ? host(/^https?:/i.test(value) ? value : "https://" + value) : value) : type === "mastodon" ? "#" + value.replace(/^#/, "").split("@")[0] : value);
       const src = { id: uid(), type, value, name, desk, on: true };
       S.sources.push(src); save();
       toast("Checking " + name + "…");

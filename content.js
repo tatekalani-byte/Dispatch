@@ -1,7 +1,7 @@
 // Dispatch: starter sources, search launchers and lessons. Plain data, no logic.
 
 // Source types: rss (any RSS/Atom URL), gnews (Google News keyword search),
-// reddit (subreddit name), youtube (channel id), hn (Hacker News search),
+// substack (newsletter name or address), reddit (subreddit name), redditsearch (Reddit-wide search), youtube (channel id), hn (Hacker News search),
 // bsky (Bluesky handle), mastodon (tag@instance).
 window.DISPATCH_PACKS = [
   {
@@ -71,12 +71,32 @@ window.DISPATCH_PACKS = [
     ],
   },
   {
-    id: "community", name: "Communities",
-    blurb: "Where reporters and researchers talk shop.",
+    id: "substack", name: "Substack",
+    blurb: "Independent journalists and newsletters, from across the political spectrum.",
+    sources: [
+      ["substack", "heathercoxrichardson", "Letters from an American"],
+      ["substack", "popular.info", "Popular Information"],
+      ["substack", "www.thefp.com", "The Free Press"],
+      ["substack", "www.racket.news", "Racket News"],
+      ["substack", "seymourhersh", "Seymour Hersh"],
+      ["substack", "www.thebulwark.com", "The Bulwark"],
+      ["substack", "www.slowboring.com", "Slow Boring"],
+      ["substack", "www.natesilver.net", "Silver Bulletin"],
+      ["substack", "www.garbageday.email", "Garbage Day"],
+      ["substack", "simonowens", "Simon Owens's media newsletter"],
+    ],
+  },
+  {
+    id: "community", name: "Reddit",
+    blurb: "Where reporters, researchers and insiders talk shop.",
     sources: [
       ["reddit", "Journalism", "r/Journalism"],
+      ["reddit", "journalismjobs", "r/journalismjobs"],
       ["reddit", "OSINT", "r/OSINT"],
       ["reddit", "foia", "r/foia"],
+      ["reddit", "Substack", "r/Substack"],
+      ["reddit", "news", "r/news"],
+      ["redditsearch", "\"public records\" OR FOIA", "Reddit: records talk"],
     ],
   },
   {
@@ -97,7 +117,7 @@ window.DISPATCH_PACKS = [
 ];
 
 // Packs loaded on first run.
-window.DISPATCH_DEFAULT_PACKS = ["investigative", "press", "liberty", "tech", "world", "social"];
+window.DISPATCH_DEFAULT_PACKS = ["investigative", "press", "liberty", "tech", "world", "substack", "community", "social"];
 
 window.DISPATCH_X_SEARCHES = [
   { label: "Breaking news", q: "breaking (news OR update) -filter:replies filter:links" },
@@ -114,6 +134,7 @@ window.DISPATCH_SEARCH = [
   { name: "Bluesky", url: "https://bsky.app/search?q={q}" },
   { name: "Threads", url: "https://www.threads.net/search?q={q}" },
   { name: "Reddit", url: "https://www.reddit.com/search/?q={q}&sort=new" },
+  { name: "Substack", url: "https://substack.com/search/{q}?searching=all_posts" },
   { name: "YouTube", url: "https://www.youtube.com/results?search_query={q}&sp=CAI%253D" },
   { name: "TikTok", url: "https://www.tiktok.com/search?q={q}" },
   { name: "Court records", url: "https://www.courtlistener.com/?q={q}" },
