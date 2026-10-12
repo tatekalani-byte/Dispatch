@@ -39,8 +39,15 @@ if (fs.existsSync(extra)) {
   }
 }
 
-const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
-const BOT_UA = "web:dispatch-feed-reader:v1.0 (by github.com/" + (process.env.GITHUB_REPOSITORY || "dispatch") + ")";
+const REPO = process.env.GITHUB_REPOSITORY || "dispatch";
+// Some sites block one kind of visitor but not another, so a refused fetch is retried as the next one.
+const AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  "Feedly/1.0 (+http://www.feedly.com/fetcher.html; like FeedFetcher-Google)",
+  "DispatchFeedReader/1.0 (+https://github.com/" + REPO + ")",
+];
+const REDDIT_UA = "web:dispatch-feed-reader:v1.0 (by github.com/" + REPO + ")";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_ITEMS = 30;
 
 // Trim a feed to its newest items and drop full-article bodies, so feeds.json stays small.
@@ -59,12 +66,23 @@ function trim(xml) {
 
 async function get(url) {
   const reddit = /reddit\.com/.test(url);
+  const agents = reddit ? [REDDIT_UA] : AGENTS;
+  let res;
+  for (let a = 0; a < agents.length; a++) {
+    res = await getAs(url, agents[a]);
+    if (res.ok || !/HTTP (401|403|406|429)/.test(res.error)) return res;
+    if (reddit && a === 0) { await sleep(15000); res = await getAs(url, REDDIT_UA); return res; }
+  }
+  return res;
+}
+
+async function getAs(url, agent) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 25000);
   try {
     const r = await fetch(url, {
       signal: ctl.signal, redirect: "follow",
-      headers: { "user-agent": reddit ? BOT_UA : BROWSER_UA, accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8" },
+      headers: { "user-agent": agent, accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8" },
     });
     const text = await r.text();
     if (!r.ok) return { ok: false, error: "HTTP " + r.status };
@@ -78,10 +96,18 @@ async function get(url) {
 
 const urls = [...wanted.keys()];
 const feeds = {};
+// Reddit rate-limits hard, so its feeds go one at a time, a few seconds apart, alongside everything else.
+const reddit = urls.filter((u) => /reddit\.com/.test(u));
+const others = urls.filter((u) => !/reddit\.com/.test(u));
 let i = 0;
-await Promise.all(Array.from({ length: 6 }, async () => {
-  while (i < urls.length) { const u = urls[i++]; feeds[u] = await get(u); }
-}));
+await Promise.all([
+  ...Array.from({ length: 6 }, async () => {
+    while (i < others.length) { const u = others[i++]; feeds[u] = await get(u); }
+  }),
+  (async () => {
+    for (const u of reddit) { feeds[u] = await get(u); await sleep(7000); }
+  })(),
+]);
 
 const out = { generatedAt: new Date().toISOString(), feeds };
 fs.writeFileSync(process.argv[2] || "feeds.json", JSON.stringify(out));

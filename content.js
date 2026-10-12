@@ -82,7 +82,6 @@ window.DISPATCH_PACKS = [
       ["substack", "www.thebulwark.com", "The Bulwark"],
       ["substack", "www.slowboring.com", "Slow Boring"],
       ["substack", "www.natesilver.net", "Silver Bulletin"],
-      ["substack", "www.garbageday.email", "Garbage Day"],
       ["substack", "simonowens", "Simon Owens's media newsletter"],
     ],
   },
