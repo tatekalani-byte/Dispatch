@@ -238,12 +238,16 @@
     }
     return "https://raw.githubusercontent.com/tatekalani-byte/Dispatch/feed-data/feeds.json";
   }
-  let bundle = null, bundleAt = 0, bundleLoading = null;
+  let bundle = null, bundleAt = 0, bundleMade = 0, bundleLoading = null;
+  // GitHub runs scheduled jobs late or skips them when it's busy. Past this age the app fetches
+  // feeds live first and keeps the snapshot as a backup.
+  const BUNDLE_FRESH = 45 * 60e3;
+  const bundleFresh = () => bundleMade && Date.now() - bundleMade < BUNDLE_FRESH;
   function loadBundle(force) {
     if (!force && bundle && Date.now() - bundleAt < 5 * 60e3) return Promise.resolve();
     if (!bundleLoading) {
       bundleLoading = timed(bundleUrl(), 15000, { cache: "no-cache" })
-        .then((t) => { bundle = JSON.parse(t).feeds || {}; bundleAt = Date.now(); })
+        .then((t) => { const j = JSON.parse(t); bundle = j.feeds || {}; bundleMade = Date.parse(j.generatedAt) || 0; bundleAt = Date.now(); })
         .catch(() => { /* fall back to proxies */ })
         .finally(() => { bundleLoading = null; });
     }
@@ -254,7 +258,11 @@
   async function fetchRss(src) {
     const url = feedUrl(src);
     const bundled = fromBundle(url);
-    if (bundled) return parseFeed(bundled, src);
+    if (bundled && bundleFresh()) return parseFeed(bundled, src);
+    try { return await fetchRssLive(url, src); }
+    catch (e) { if (bundled) return parseFeed(bundled, src); throw e; }
+  }
+  async function fetchRssLive(url, src) {
     // The proxies and rss2json (which turns a feed into JSON on its own servers) race each other.
     const viaProxy = getFeedText(url).then((text) => text ? parseFeed(text, src) : Promise.reject(new Error("no proxy")));
     const viaJson = timed("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(url), 10000).then((t) => {
@@ -316,7 +324,7 @@
   async function fetchReddit(src) {
     const [json, rss] = redditUrls(src);
     const bundled = fromBundle(rss);
-    const text = bundled ? null : await getText(json, (t) => /^\s*\{/.test(t) && t.includes('"children"'));
+    const text = bundled && bundleFresh() ? null : await getText(json, (t) => /^\s*\{/.test(t) && t.includes('"children"'));
     if (text) {
       return JSON.parse(text).data.children.map((c) => c.data).filter((d) => d && d.title).map((d) => {
         const img = d.preview && d.preview.images && d.preview.images[0];
@@ -332,7 +340,7 @@
         };
       });
     }
-    const feed = bundled || await getFeedText(rss);
+    const feed = (bundled && bundleFresh() ? bundled : await getFeedText(rss)) || bundled;
     if (!feed) throw new Error("Reddit didn't answer. It often blocks public proxies; a proxy of your own (see Settings) fixes that.");
     return parseFeed(feed, src).map((a) => ({
       id: a.id, sid: src.id, kind: "post", link: a.link, date: a.date, title: a.title, text: a.summary,
@@ -508,6 +516,7 @@
     const failed = sources.filter((s) => s.on && C[s.id] && C[s.id].err);
     const never = sources.filter((s) => s.on && !C[s.id]).length;
     let h = refreshing ? "Checking your sources…" + (progress && progress.total ? " " + progress.done + " of " + progress.total : "") : S.lastRefresh ? "Updated " + ago(S.lastRefresh) + (ago(S.lastRefresh) === "now" ? "" : " ago") : never ? "Not loaded yet" : "";
+    if (!refreshing && bundleMade && !bundleFresh()) h += " · GitHub's copy is " + ago(bundleMade) + " old, so feeds were fetched live";
     if (failed.length) {
       h += ` <details class="errors"><summary>${failed.length} source${failed.length > 1 ? "s" : ""} didn't load</summary><ul>` +
         failed.map((s) => `<li><b>${esc(s.name)}</b>: ${esc(C[s.id].err)}</li>`).join("") +
