@@ -96,7 +96,7 @@
   }
   function fresh() {
     const s = {
-      v: 2, desks: [], sources: [],
+      v: 3, desks: [], sources: [],
       xSearches: window.DISPATCH_X_SEARCHES.map((x) => ({ id: uid(), label: x.label, q: x.q })),
       alerts: ["FOIA", "subpoena", "leaked", "whistleblower", "lawsuit"], mutes: [],
       read: {}, clips: [], pitches: [], contacts: [], drills: [], lessons: {}, days: {},
@@ -112,6 +112,8 @@
   S = Object.assign(fresh(), S, S.desks ? {} : { desks: [] });
   // Version 2 added Substack newsletters and made Reddit part of Social.
   if (S.v < 2) { ["substack", "community"].forEach((id) => addPack(S, id)); S.v = 2; }
+  // Version 3 dropped Garbage Day, whose feed no longer exists.
+  if (S.v < 3) { S.sources = S.sources.filter((x) => !(x.type === "substack" && x.value === "www.garbageday.email")); S.v = 3; }
   let C = loadJSON(CACHE_KEY) || {}; // sourceId -> { at, items, err }
 
   function save() {

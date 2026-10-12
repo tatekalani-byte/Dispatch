@@ -71,7 +71,7 @@ async function get(url) {
   for (let a = 0; a < agents.length; a++) {
     res = await getAs(url, agents[a]);
     if (res.ok || !/HTTP (401|403|406|429)/.test(res.error)) return res;
-    if (reddit && a === 0) { await sleep(15000); res = await getAs(url, REDDIT_UA); return res; }
+    if (reddit && a === 0) { await sleep(30000); res = await getAs(url, REDDIT_UA); return res; }
   }
   return res;
 }
@@ -105,7 +105,7 @@ await Promise.all([
     while (i < others.length) { const u = others[i++]; feeds[u] = await get(u); }
   }),
   (async () => {
-    for (const u of reddit) { feeds[u] = await get(u); await sleep(7000); }
+    for (const u of reddit) { feeds[u] = await get(u); await sleep(20000); }
   })(),
 ]);
 
