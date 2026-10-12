@@ -1,6 +1,8 @@
 // Fetches every feed in Dispatch's starter packs (plus extra-feeds.txt) and writes one
 // feeds.json the app can read without a CORS proxy. Run by .github/workflows/feeds.yml.
-// Usage: node scripts/fetch-feeds.mjs OUTPUT.json
+// Usage: node scripts/fetch-feeds.mjs OUTPUT.json [PREVIOUS.json]
+// When a feed fails, the copy from PREVIOUS.json (the last snapshot) is kept, so a feed that
+// is briefly rate-limited or down doesn't disappear from the app.
 import fs from "node:fs";
 import vm from "node:vm";
 import path from "node:path";
@@ -109,12 +111,20 @@ await Promise.all([
   })(),
 ]);
 
+let previous = {};
+try { previous = JSON.parse(fs.readFileSync(process.argv[3], "utf8")).feeds || {}; } catch (e) { /* first run */ }
+for (const u of urls) {
+  const old = previous[u];
+  if (!feeds[u].ok && old && old.ok) feeds[u] = { ...old, stale: feeds[u].error, fetchedAt: old.fetchedAt || null };
+  else if (feeds[u].ok) feeds[u].fetchedAt = new Date().toISOString();
+}
+
 const out = { generatedAt: new Date().toISOString(), feeds };
 fs.writeFileSync(process.argv[2] || "feeds.json", JSON.stringify(out));
 
 const bad = urls.filter((u) => !feeds[u].ok);
 for (const u of urls) {
   const f = feeds[u];
-  console.log((f.ok ? "OK    " : "FAIL  ") + wanted.get(u).padEnd(34) + " " + (f.ok ? f.items + " items" : f.error) + "  " + u);
+  console.log((f.stale ? "KEPT  " : f.ok ? "OK    " : "FAIL  ") + wanted.get(u).padEnd(34) + " " + (f.stale ? "kept last copy (" + f.stale + ")" : f.ok ? f.items + " items" : f.error) + "  " + u);
 }
 console.log(`\n${urls.length - bad.length} of ${urls.length} feeds fetched. feeds.json is ${Math.round(fs.statSync(process.argv[2] || "feeds.json").size / 1024)} KB.`);

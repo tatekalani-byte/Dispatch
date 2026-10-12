@@ -26,8 +26,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - name: Get the last snapshot
+        run: |
+          mkdir -p out
+          git fetch -q --depth 1 origin feed-data && git show FETCH_HEAD:feeds.json > previous.json || echo "{}" > previous.json
       - name: Fetch feeds
-        run: mkdir -p out && node scripts/fetch-feeds.mjs out/feeds.json
+        run: node scripts/fetch-feeds.mjs out/feeds.json previous.json
       - name: Publish to the feed-data branch
         working-directory: out
         env:
