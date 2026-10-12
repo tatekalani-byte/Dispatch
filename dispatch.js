@@ -139,35 +139,39 @@
   }
 
   // ---------- fetching ----------
-  async function timed(url, ms) {
+  async function timed(url, ms, opts) {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), ms || 12000);
     try {
-      const r = await fetch(url, { signal: ctl.signal });
+      const r = await fetch(url, Object.assign({ signal: ctl.signal }, opts));
       if (!r.ok) throw new Error("HTTP " + r.status);
       return await r.text();
     } finally { clearTimeout(t); }
   }
   const looksLikeFeed = (t) => /<(rss|feed|rdf:RDF)[\s>]/i.test(t.slice(0, 6000));
-  let proxyStart = 0;
 
   async function getFeedText(url) { return getText(url, looksLikeFeed); }
-  async function getText(url, ok) {
-    const tries = [];
-    if (S.proxy) tries.push((u) => S.proxy.includes("{url}") ? S.proxy.replace("{url}", encodeURIComponent(u)) : S.proxy + encodeURIComponent(u));
-    tries.push((u) => u);
-    for (let i = 0; i < PROXIES.length; i++) tries.push(PROXIES[(proxyStart + i) % PROXIES.length]);
-    for (const make of tries) {
-      try {
-        const text = await timed(make(url));
-        if (ok(text)) {
-          const pi = PROXIES.indexOf(make);
-          if (pi >= 0) proxyStart = pi;
-          return text;
-        }
-      } catch (e) { /* next */ }
+  // Tries the address directly and through every proxy at once, and takes the first good answer,
+  // so a feed that can't be reached gives up after about 10 seconds instead of a minute.
+  async function getText(url, ok, ms) {
+    const makers = [(u) => u].concat(PROXIES);
+    if (S.proxy) makers.unshift((u) => S.proxy.includes("{url}") ? S.proxy.replace("{url}", encodeURIComponent(u)) : S.proxy + encodeURIComponent(u));
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), ms || 10000);
+    try {
+      return await Promise.any(makers.map(async (make) => {
+        const r = await fetch(make(url), { signal: ctl.signal });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const text = await r.text();
+        if (!ok(text)) throw new Error("Not a feed");
+        return text;
+      }));
+    } catch (e) {
+      return null;
+    } finally {
+      clearTimeout(timer);
+      ctl.abort(); // stop the slower attempts
     }
-    return null;
   }
 
   function firstTag(el, ...names) {
@@ -235,10 +239,10 @@
     return "https://raw.githubusercontent.com/tatekalani-byte/Dispatch/feed-data/feeds.json";
   }
   let bundle = null, bundleAt = 0, bundleLoading = null;
-  function loadBundle() {
-    if (bundle && Date.now() - bundleAt < 5 * 60e3) return Promise.resolve();
+  function loadBundle(force) {
+    if (!force && bundle && Date.now() - bundleAt < 5 * 60e3) return Promise.resolve();
     if (!bundleLoading) {
-      bundleLoading = timed(bundleUrl(), 15000)
+      bundleLoading = timed(bundleUrl(), 15000, { cache: "no-cache" })
         .then((t) => { bundle = JSON.parse(t).feeds || {}; bundleAt = Date.now(); })
         .catch(() => { /* fall back to proxies */ })
         .finally(() => { bundleLoading = null; });
@@ -251,20 +255,19 @@
     const url = feedUrl(src);
     const bundled = fromBundle(url);
     if (bundled) return parseFeed(bundled, src);
-    const text = await getFeedText(url);
-    if (text) return parseFeed(text, src);
-    // Last resort: rss2json turns a feed into JSON on its own servers.
-    try {
-      const j = JSON.parse(await timed("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(url)));
-      if (j.status === "ok") {
-        return j.items.map((it) => ({
-          id: src.id + "|" + it.link, sid: src.id, kind: "article", title: stripHtml(it.title), link: it.link,
-          date: Date.parse((it.pubDate || "").replace(" ", "T") + "Z") || 0, summary: clip(stripHtml(it.description), 280),
-          outlet: src.name, author: it.author || "", image: it.thumbnail || (it.enclosure && it.enclosure.link) || "",
-        }));
-      }
-    } catch (e) { /* fall through */ }
-    throw new Error("Couldn't reach this feed. Check the address, or add a feed proxy in Settings.");
+    // The proxies and rss2json (which turns a feed into JSON on its own servers) race each other.
+    const viaProxy = getFeedText(url).then((text) => text ? parseFeed(text, src) : Promise.reject(new Error("no proxy")));
+    const viaJson = timed("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(url), 10000).then((t) => {
+      const j = JSON.parse(t);
+      if (j.status !== "ok") throw new Error(j.message || "rss2json failed");
+      return j.items.map((it) => ({
+        id: src.id + "|" + it.link, sid: src.id, kind: "article", title: stripHtml(it.title), link: it.link,
+        date: Date.parse((it.pubDate || "").replace(" ", "T") + "Z") || 0, summary: clip(stripHtml(it.description), 280),
+        outlet: src.name, author: it.author || "", image: it.thumbnail || (it.enclosure && it.enclosure.link) || "",
+      }));
+    });
+    try { return await Promise.any([viaProxy, viaJson]); }
+    catch (e) { throw new Error("Couldn't reach this feed. Check the address, or add a feed proxy in Settings."); }
   }
 
   async function fetchHN(src) {
@@ -383,25 +386,39 @@
     }
   }
 
-  let refreshing = false;
-  async function refreshAll(only) {
-    if (refreshing) return;
+  let refreshing = false, progress = null;
+  async function refreshAll(only, manual) {
+    if (refreshing) { if (manual) toast("Still checking " + (progress ? progress.total - progress.done + " more sources" : "your sources") + "…"); return; }
     refreshing = true;
     $("#refresh-btn").classList.add("spin");
     const list = S.sources.filter((s) => s.on && (!only || only.includes(s.id)));
-    let i = 0, lastPaint = 0;
-    const worker = async () => {
-      while (i < list.length) {
-        await fetchSource(list[i++]);
-        if (Date.now() - lastPaint > 700) { lastPaint = Date.now(); paintLists(); }
-      }
-    };
-    await Promise.all(Array.from({ length: 6 }, worker));
-    if (!only) S.lastRefresh = Date.now();
-    refreshing = false;
-    $("#refresh-btn").classList.remove("spin");
-    save(); saveCache(); paintLists();
+    const before = new Set(allItems(false).concat(allItems(true)).map((it) => it.id));
+    progress = { done: 0, total: list.length };
+    paintLists();
+    try {
+      await loadBundle(manual);
+      let i = 0, lastPaint = 0;
+      const worker = async () => {
+        while (i < list.length) {
+          await fetchSource(list[i++]);
+          progress.done++;
+          if (Date.now() - lastPaint > 500) { lastPaint = Date.now(); paintLists(); }
+        }
+      };
+      await Promise.all(Array.from({ length: 6 }, worker));
+      if (!only) S.lastRefresh = Date.now();
+    } finally {
+      refreshing = false; progress = null;
+      $("#refresh-btn").classList.remove("spin");
+      save(); saveCache(); paintLists();
+    }
+    if (manual) {
+      const fresh = allItems(false).concat(allItems(true)).filter((it) => !before.has(it.id)).length;
+      const failed = list.filter((s) => C[s.id] && C[s.id].err).length;
+      toast((fresh ? fresh + " new " + (fresh === 1 ? "story" : "stories") : "You're up to date") + (failed ? " · " + failed + " source" + (failed === 1 ? "" : "s") + " didn't load" : ""));
+    }
   }
+
 
   // ---------- item selection ----------
   function termsIn(text, terms) {
@@ -490,7 +507,7 @@
   function statusLine(sources) {
     const failed = sources.filter((s) => s.on && C[s.id] && C[s.id].err);
     const never = sources.filter((s) => s.on && !C[s.id]).length;
-    let h = refreshing ? "Checking your sources…" : S.lastRefresh ? "Updated " + ago(S.lastRefresh) + (ago(S.lastRefresh) === "now" ? "" : " ago") : never ? "Not loaded yet" : "";
+    let h = refreshing ? "Checking your sources…" + (progress && progress.total ? " " + progress.done + " of " + progress.total : "") : S.lastRefresh ? "Updated " + ago(S.lastRefresh) + (ago(S.lastRefresh) === "now" ? "" : " ago") : never ? "Not loaded yet" : "";
     if (failed.length) {
       h += ` <details class="errors"><summary>${failed.length} source${failed.length > 1 ? "s" : ""} didn't load</summary><ul>` +
         failed.map((s) => `<li><b>${esc(s.name)}</b>: ${esc(C[s.id].err)}</li>`).join("") +
@@ -1591,7 +1608,7 @@
       case "contact-today": contact.last = dayKey(); save(); renderNotebook(); toast("Logged"); break;
     }
   });
-  $("#refresh-btn").addEventListener("click", () => refreshAll());
+  $("#refresh-btn").addEventListener("click", () => refreshAll(null, true));
   $("#settings-btn").addEventListener("click", () => openSettings());
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && Date.now() - S.lastRefresh > 15 * 60e3) refreshAll();
