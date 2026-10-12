@@ -220,8 +220,35 @@
     return out;
   }
 
+  // Feeds fetched every 30 minutes on GitHub's servers by .github/workflows/feeds.yml and
+  // published as feeds.json on the repo's feed-data branch. Read first, so most feeds
+  // never need a CORS proxy.
+  function bundleUrl() {
+    const h = location.hostname;
+    if (h.endsWith(".github.io")) {
+      const owner = h.split(".")[0];
+      const repo = location.pathname.split("/")[1] || h;
+      return "https://raw.githubusercontent.com/" + owner + "/" + repo + "/feed-data/feeds.json";
+    }
+    return "https://raw.githubusercontent.com/tatekalani-byte/Dispatch/feed-data/feeds.json";
+  }
+  let bundle = null, bundleAt = 0, bundleLoading = null;
+  function loadBundle() {
+    if (bundle && Date.now() - bundleAt < 5 * 60e3) return Promise.resolve();
+    if (!bundleLoading) {
+      bundleLoading = timed(bundleUrl(), 15000)
+        .then((t) => { bundle = JSON.parse(t).feeds || {}; bundleAt = Date.now(); })
+        .catch(() => { /* fall back to proxies */ })
+        .finally(() => { bundleLoading = null; });
+    }
+    return bundleLoading;
+  }
+  function fromBundle(url) { const f = bundle && bundle[url]; return f && f.ok ? f.text : null; }
+
   async function fetchRss(src) {
     const url = feedUrl(src);
+    const bundled = fromBundle(url);
+    if (bundled) return parseFeed(bundled, src);
     const text = await getFeedText(url);
     if (text) return parseFeed(text, src);
     // Last resort: rss2json turns a feed into JSON on its own servers.
@@ -283,7 +310,8 @@
   }
   async function fetchReddit(src) {
     const [json, rss] = redditUrls(src);
-    const text = await getText(json, (t) => /^\s*\{/.test(t) && t.includes('"children"'));
+    const bundled = fromBundle(rss);
+    const text = bundled ? null : await getText(json, (t) => /^\s*\{/.test(t) && t.includes('"children"'));
     if (text) {
       return JSON.parse(text).data.children.map((c) => c.data).filter((d) => d && d.title).map((d) => {
         const img = d.preview && d.preview.images && d.preview.images[0];
@@ -299,7 +327,7 @@
         };
       });
     }
-    const feed = await getFeedText(rss);
+    const feed = bundled || await getFeedText(rss);
     if (!feed) throw new Error("Reddit didn't answer. It often blocks public proxies; a proxy of your own (see Settings) fixes that.");
     return parseFeed(feed, src).map((a) => ({
       id: a.id, sid: src.id, kind: "post", link: a.link, date: a.date, title: a.title, text: a.summary,
@@ -338,6 +366,7 @@
   }
 
   async function fetchSource(src) {
+    await loadBundle();
     try {
       let items;
       if (src.type === "hn") items = await fetchHN(src);

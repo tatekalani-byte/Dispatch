@@ -1,0 +1,2 @@
+# Extra feed addresses for the GitHub Action to fetch, one per line.
+# Add any feed you follow in Dispatch that won't load, and it will load from here.

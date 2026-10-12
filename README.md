@@ -12,8 +12,12 @@ A journalist's toolkit that works on a laptop or as a home screen app, offline t
 
 Everything is stored on the device. **Settings → Save backup file** makes a copy you can restore on another phone.
 
-## Making feeds reliable
-Browsers can't read most news feeds directly (the sites don't allow it), so Dispatch passes them through free public proxies. Those can be slow or down. For a dependable wire, make your own free proxy with a Cloudflare Worker (Workers → Create → paste this → Deploy), then paste its address into **Settings → Feed proxy** as `https://YOUR-WORKER.workers.dev/?url={url}`:
+## How feeds load
+Browsers can't read most news feeds directly (the sites don't allow it), so Dispatch gets them three ways, in order:
+
+1. **From GitHub.** The **Fetch feeds** action (`.github/workflows/feeds.yml`) runs every 30 minutes on GitHub's servers, fetches every feed in the starter packs, and saves them as `feeds.json` on the `feed-data` branch. The app reads that one file first. Its run log lists every feed as OK or FAIL, which makes broken addresses easy to spot. To have it fetch a feed you added yourself, put the feed's address on its own line in `extra-feeds.txt`.
+2. **Directly.** Bluesky, Mastodon and Hacker News allow it, so they always load straight from the browser.
+3. **Through a proxy.** Anything else goes through free public proxies, which can be slow or down. For those, you can run your own free proxy with a Cloudflare Worker (Workers → Create → paste this → Deploy), then paste its address into **Settings → Feed proxy** as `https://YOUR-WORKER.workers.dev/?url={url}`:
 
 ```js
 export default {
@@ -28,7 +32,7 @@ export default {
 };
 ```
 
-Bluesky, Mastodon and Hacker News load directly and don't need a proxy. Reddit is tried directly first, but it often blocks the public proxies, so your own proxy helps most there.
+GitHub pauses scheduled actions in repositories with no activity for 60 days. If the wire goes stale, open the **Actions** tab and re-enable **Fetch feeds**.
 
 ## Run it
 Plain HTML, CSS and JavaScript with no build step:
