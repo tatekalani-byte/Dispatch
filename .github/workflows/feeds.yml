@@ -3,8 +3,10 @@
 name: Fetch feeds
 
 on:
+  # GitHub delays or drops scheduled runs when it's busy, so this asks for one every 15 minutes
+  # (off the busy top of the hour) to get a fresh snapshot at least every half hour or so.
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "4,19,34,49 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
