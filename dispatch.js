@@ -16,6 +16,7 @@
     youtube: { label: "YouTube channel", ph: "UCxxxxxxxxxxxxxxxxxxxxxx", help: "The channel ID, which starts with UC. On the channel page: About, Share channel, Copy channel ID." },
     hn: { label: "Hacker News search", ph: "surveillance", help: "Recent Hacker News stories that match your words." },
     bsky: { label: "Bluesky account", ph: "apnews.com", help: "The account's handle, without the @.", social: true },
+    bskysearch: { label: "Bluesky search", ph: "press freedom", help: "New Bluesky posts that match your words or #hashtag.", social: true },
     mastodon: { label: "Mastodon hashtag", ph: "journalism@mastodon.social", help: "Write it as tag@server. Shows public posts with that hashtag that the server knows about.", social: true },
   };
 
@@ -98,6 +99,7 @@
     const s = {
       v: 3, desks: [], sources: [],
       xSearches: window.DISPATCH_X_SEARCHES.map((x) => ({ id: uid(), label: x.label, q: x.q })),
+      watches: [], watchSel: "all", pages: [], watchMode: "keywords",
       alerts: ["FOIA", "subpoena", "leaked", "whistleblower", "lawsuit"], mutes: [],
       read: {}, clips: [], pitches: [], contacts: [], drills: [], lessons: {}, days: {},
       proxy: "", theme: "", tab: "wire", desk: "all", socialSrc: "all", nb: "pitches", pitchFilter: "all",
@@ -291,25 +293,31 @@
   async function fetchBsky(src) {
     const actor = src.value.replace(/^@/, "").trim();
     const j = JSON.parse(await timed("https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?limit=30&filter=posts_no_replies&actor=" + encodeURIComponent(actor)));
-    return (j.feed || []).map((f) => {
-      const p = f.post;
-      const rkey = p.uri.split("/").pop();
-      const e = p.embed || {};
-      const media = e.media || e;
-      const images = (media.images || []).map((i) => i.thumb).filter(Boolean);
-      if (media.thumbnail) images.push(media.thumbnail);
-      const ext = e.external || (e.media && e.media.external);
-      const repost = f.reason && /reasonRepost/.test(f.reason.$type || "");
-      return {
-        id: src.id + "|" + p.uri, sid: src.id, kind: "post",
-        link: "https://bsky.app/profile/" + p.author.handle + "/post/" + rkey,
-        date: Date.parse((repost && f.reason.indexedAt) || p.record.createdAt || p.indexedAt) || 0,
-        text: p.record.text || "", author: p.author.displayName || p.author.handle, handle: "@" + p.author.handle,
-        avatar: p.author.avatar || "", images: images.slice(0, 4),
-        card: ext ? { url: ext.uri, title: ext.title, desc: clip(ext.description, 160) } : null,
-        repostBy: repost ? src.name : "", net: "Bluesky",
-      };
-    });
+    return (j.feed || []).map((f) => bskyPost(f.post, f.reason, src));
+  }
+  async function fetchBskySearch(src) {
+    let t;
+    try { t = await timed("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?sort=latest&limit=30&q=" + encodeURIComponent(src.value.trim())); }
+    catch (e) { throw new Error(/HTTP 40[13]/.test(e.message) ? "Bluesky isn't allowing searches without signing in right now" : e.message); }
+    return (JSON.parse(t).posts || []).map((p) => bskyPost(p, null, src));
+  }
+  function bskyPost(p, reason, src) {
+    const rkey = p.uri.split("/").pop();
+    const e = p.embed || {};
+    const media = e.media || e;
+    const images = (media.images || []).map((i) => i.thumb).filter(Boolean);
+    if (media.thumbnail) images.push(media.thumbnail);
+    const ext = e.external || (e.media && e.media.external);
+    const repost = reason && /reasonRepost/.test(reason.$type || "");
+    return {
+      id: src.id + "|" + p.uri, sid: src.id, kind: "post",
+      link: "https://bsky.app/profile/" + p.author.handle + "/post/" + rkey,
+      date: Date.parse((repost && reason.indexedAt) || p.record.createdAt || p.indexedAt) || 0,
+      text: p.record.text || "", author: p.author.displayName || p.author.handle, handle: "@" + p.author.handle,
+      avatar: p.author.avatar || "", images: images.slice(0, 4),
+      card: ext ? { url: ext.uri, title: ext.title, desc: clip(ext.description, 160) } : null,
+      repostBy: repost ? src.name : "", net: "Bluesky",
+    };
   }
 
   // Reddit: JSON first (directly, then through the proxies), its RSS feed as a fallback.
@@ -384,6 +392,7 @@
       let items;
       if (src.type === "hn") items = await fetchHN(src);
       else if (src.type === "bsky") items = await fetchBsky(src);
+      else if (src.type === "bskysearch") items = await fetchBskySearch(src);
       else if (src.type === "mastodon") items = await fetchMastodon(src);
       else if (src.type === "reddit" || src.type === "redditsearch") items = await fetchReddit(src);
       else items = await fetchRss(src);
@@ -401,7 +410,9 @@
     $("#refresh-btn").classList.add("spin");
     const list = S.sources.filter((s) => s.on && (!only || only.includes(s.id)));
     const before = new Set(allItems(false).concat(allItems(true)).map((it) => it.id));
-    progress = { done: 0, total: list.length };
+    const pageList = only ? [] : S.pages.slice();
+    progress = { done: 0, total: list.length + pageList.length };
+    let pagesChanged = 0;
     paintLists();
     try {
       await loadBundle(manual);
@@ -413,7 +424,7 @@
           if (Date.now() - lastPaint > 500) { lastPaint = Date.now(); paintLists(); }
         }
       };
-      await Promise.all(Array.from({ length: 6 }, worker));
+      await Promise.all([Promise.all(Array.from({ length: 6 }, worker)), checkPages(pageList).then((n) => { pagesChanged = n; })]);
       if (!only) S.lastRefresh = Date.now();
     } finally {
       refreshing = false; progress = null;
@@ -423,7 +434,7 @@
     if (manual) {
       const fresh = allItems(false).concat(allItems(true)).filter((it) => !before.has(it.id)).length;
       const failed = list.filter((s) => C[s.id] && C[s.id].err).length;
-      toast((fresh ? fresh + " new " + (fresh === 1 ? "story" : "stories") : "You're up to date") + (failed ? " · " + failed + " source" + (failed === 1 ? "" : "s") + " didn't load" : ""));
+      toast((fresh ? fresh + " new " + (fresh === 1 ? "story" : "stories") : "You're up to date") + (pagesChanged ? " · " + pagesChanged + " watched page" + (pagesChanged === 1 ? "" : "s") + " changed" : "") + (failed ? " · " + failed + " source" + (failed === 1 ? "" : "s") + " didn't load" : ""));
     }
   }
 
@@ -433,10 +444,11 @@
     const low = text.toLowerCase();
     return terms.filter((t) => low.includes(t.toLowerCase()));
   }
-  function allItems(social) {
+  function allItems(social) { return itemsWhere((s) => !s.watch && isSocial(s) === social); }
+  function itemsWhere(pick) {
     const seen = new Set(), titles = new Set(), out = [];
     S.sources.forEach((s) => {
-      if (!s.on || isSocial(s) !== social || !C[s.id]) return;
+      if (!s.on || !pick(s) || !C[s.id]) return;
       C[s.id].items.forEach((it) => {
         const t = (it.title || it.text || "").toLowerCase().replace(/\W+/g, " ").trim().slice(0, 90);
         if (seen.has(it.link) || (it.kind === "article" && titles.has(t))) return;
@@ -476,12 +488,13 @@
   function setTab(tab) {
     S.tab = tab; save();
     $$(".nav button").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
-    ({ wire: renderWire, social: renderSocial, tools: renderTools, notebook: renderNotebook, learn: renderLearn })[tab]();
+    ({ wire: renderWire, watch: renderWatch, social: renderSocial, tools: renderTools, notebook: renderNotebook, learn: renderLearn })[tab]();
     window.scrollTo(0, 0);
   }
   function paintLists() {
     if (S.tab === "wire") paintWire();
     if (S.tab === "social") paintSocial();
+    if (S.tab === "watch") paintWatch();
   }
 
   // Wire
@@ -608,7 +621,11 @@
         : `<div class="empty"><h3>Follow people and hashtags</h3><p>Add subreddits, Reddit searches, Bluesky accounts and Mastodon hashtags in Sources.</p><button class="btn primary" type="button" data-act="settings">${icon("plus")}Add sources</button></div>`;
       return;
     }
-    list.innerHTML = items.map((p) => `<article class="post" data-id="${esc(p.id)}">
+    list.innerHTML = items.map(postHtml).join("");
+  }
+
+  function postHtml(p) {
+    return `<article class="post" data-id="${esc(p.id)}">
       <div class="post-head">${p.avatar ? `<img class="avatar" src="${esc(p.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="avatar"></span>`}
         <div class="post-who"><b>${esc(p.author)}</b><span>${esc(p.handle)} · ${esc(p.net)} · ${ago(p.date)}${p.repostBy ? " · reposted" : ""}</span></div></div>
       ${p.title ? `<a class="post-title" href="${esc(p.link)}" target="_blank" rel="noopener" data-open>${highlight(p.title, p._alerts, "")}</a>` : ""}
@@ -621,7 +638,231 @@
         <button class="act" type="button" data-act="save" aria-pressed="${!!clipFor(p.link)}">${icon("bookmark")}${clipFor(p.link) ? "Saved" : "Save"}</button>
         <button class="act" type="button" data-act="cite">${icon("copy")}Cite</button>
         <button class="act" type="button" data-act="archive">${icon("archive")}Archive</button>
-      </div></article>`).join("");
+      </div></article>`;
+  }
+
+  // Watch: keywords and hashtags tracked across news and social platforms.
+  const WATCH_NETS = [
+    ["news", "News", "gnews"], ["reddit", "Reddit", "redditsearch"], ["bluesky", "Bluesky", "bskysearch"],
+    ["mastodon", "Mastodon", "mastodon"], ["hn", "Hacker News", "hn"],
+  ];
+  const MASTODON_SERVERS = ["mastodon.social", "journa.host"];
+  const watchTag = (term) => term.replace(/^#/, "").replace(/[^\p{L}\p{N}_]+/gu, "");
+  function watchSources(w) {
+    const term = w.term.trim(), bare = term.replace(/^#/, "").replace(/^"(.*)"$/, "$1"), tag = watchTag(term);
+    const phrase = /\s/.test(bare) ? "\"" + bare + "\"" : bare;
+    const out = [];
+    if (w.nets.news) out.push(["gnews", phrase + " when:7d"]);
+    if (w.nets.reddit) out.push(["redditsearch", phrase]);
+    if (w.nets.bluesky) out.push(["bskysearch", term.startsWith("#") ? term : phrase]);
+    if (w.nets.mastodon && tag) MASTODON_SERVERS.forEach((sv) => out.push(["mastodon", tag + "@" + sv]));
+    if (w.nets.hn) out.push(["hn", bare]);
+    return out;
+  }
+  // Rebuilds a watch's hidden sources from its term and platform switches; returns new source ids.
+  function syncWatch(w) {
+    const want = watchSources(w);
+    const mine = S.sources.filter((s) => s.watch === w.id);
+    const keep = new Set();
+    const added = [];
+    want.forEach(([type, value]) => {
+      const have = mine.find((s) => s.type === type && s.value === value);
+      if (have) { keep.add(have.id); return; }
+      const src = { id: uid(), type, value, name: (WATCH_NETS.find((n) => n[2] === type) || [0, type])[1], desk: null, on: true, watch: w.id };
+      S.sources.push(src); added.push(src.id);
+    });
+    S.sources = S.sources.filter((s) => s.watch !== w.id || keep.has(s.id) || added.includes(s.id));
+    mine.filter((s) => !keep.has(s.id)).forEach((s) => delete C[s.id]);
+    return added;
+  }
+  function watchItems(id) {
+    return itemsWhere((s) => s.watch && (id === "all" ? S.watches.some((w) => w.id === s.watch) : s.watch === id));
+  }
+  function watchLaunchers(term) {
+    const bare = term.replace(/^#/, "").replace(/^"(.*)"$/, "$1"), tag = watchTag(term), q = encodeURIComponent(term);
+    const L = [
+      ["X (Latest)", "https://x.com/search?q=" + q + "&f=live"],
+      ["Threads", "https://www.threads.net/search?q=" + encodeURIComponent(bare)],
+      ["TikTok", tag && !/\s/.test(bare) ? "https://www.tiktok.com/tag/" + encodeURIComponent(tag) : "https://www.tiktok.com/search?q=" + encodeURIComponent(bare)],
+      ["Instagram", tag ? "https://www.instagram.com/explore/tags/" + encodeURIComponent(tag.toLowerCase()) + "/" : ""],
+      ["YouTube", "https://www.youtube.com/results?search_query=" + encodeURIComponent(bare) + "&sp=CAI%253D"],
+      ["Facebook", "https://www.facebook.com/search/posts?q=" + encodeURIComponent(bare)],
+    ];
+    return L.filter((x) => x[1]).map(([n, u]) => `<a class="btn sm" href="${esc(u)}" target="_blank" rel="noopener">${esc(n)} ${icon("ext")}</a>`).join("");
+  }
+  function renderWatch() {
+    const pages = S.watchMode === "pages";
+    const newPages = S.pages.filter((p) => p.changedAt && p.changedAt > (p.seen || 0)).length;
+    view.innerHTML = `
+      <div class="seg" role="group" aria-label="What to watch" style="margin-bottom:12px">
+        <button type="button" data-wmode="keywords" aria-pressed="${!pages}">Keywords &amp; hashtags</button>
+        <button type="button" data-wmode="pages" aria-pressed="${pages}">Pages${newPages ? " · " + newPages + " new" : ""}</button>
+      </div>
+      ${pages ? `<form class="row" id="page-add" autocomplete="off">
+        <input class="field grow" name="url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="Paste a link to watch for updates" required>
+        <button class="btn primary" type="submit">${icon("plus")}Watch</button>
+      </form>` : `<form class="row" id="watch-add" autocomplete="off">
+        <input class="field grow" name="term" placeholder="Keyword, \"phrase\" or #hashtag" required>
+        <button class="btn primary" type="submit">${icon("plus")}Watch</button>
+      </form>
+      <p class="small muted" style="margin:6px 0 0">Each one is tracked across Google News, Reddit, Bluesky, Mastodon and Hacker News.</p>`}
+      <div class="chips" id="watch-chips" style="margin-top:10px"></div>
+      <div id="watch-head"></div>
+      <div class="status" id="watch-status"></div>
+      <div id="watch-list"></div>`;
+    if (pages) {
+      $("#page-add").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        let url = e.target.url.value.trim();
+        if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+        if (S.pages.some((p) => p.url === url)) return toast("You're already watching that page");
+        const pg = { id: uid(), url, name: "", seen: Date.now() };
+        S.pages.unshift(pg); save();
+        e.target.url.value = "";
+        paintPages(); toast("Reading the page…");
+        await checkPage(pg); save(); paintPages();
+        toast(pg.err ? "Couldn't reach it yet. It'll keep trying on each refresh." : "Watching " + pg.name + ". You'll see what changes on each refresh.");
+      });
+      return paintPages();
+    }
+    $("#watch-add").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const term = e.target.term.value.trim().replace(/\s+/g, " ");
+      if (!term) return;
+      if (S.watches.some((w) => w.term.toLowerCase() === term.toLowerCase())) return toast("You're already watching that");
+      const w = { id: uid(), term, nets: { news: true, reddit: true, bluesky: true, mastodon: true, hn: false }, seen: Date.now() };
+      S.watches.unshift(w); S.watchSel = w.id;
+      const ids = syncWatch(w); save();
+      e.target.term.value = "";
+      paintWatch(); refreshAll(ids);
+    });
+    paintWatch();
+  }
+  function paintWatch() {
+    if (S.watchMode === "pages") return paintPages();
+    const list = $("#watch-list");
+    if (!list) return;
+    if (S.watchSel !== "all" && !S.watches.some((w) => w.id === S.watchSel)) S.watchSel = "all";
+    const day = Date.now() - 864e5;
+    const count = (id) => watchItems(id).filter((it) => it.date > day).length;
+    $("#watch-chips").innerHTML = S.watches.length ? [{ id: "all", term: "All watches" }].concat(S.watches).map((w) =>
+      `<button class="chip" type="button" data-watch="${w.id}" aria-pressed="${S.watchSel === w.id}">${esc(w.term)}<span class="n">${count(w.id) || ""}</span></button>`).join("") : "";
+    const w = S.watches.find((x) => x.id === S.watchSel);
+    $("#watch-head").innerHTML = w ? `<div class="card" style="margin:4px 0 8px">
+        <div class="row" style="justify-content:space-between"><h2 style="font-size:1.35rem">${esc(w.term)}</h2>
+          <button class="btn sm ghost danger" type="button" data-act="watch-del">Stop watching</button></div>
+        <p class="small muted" style="margin:2px 0 8px"><b class="mono">${count(w.id)}</b> mentions in the last 24 hours across the platforms below.</p>
+        <div class="row" style="gap:12px">${WATCH_NETS.map(([k, label]) => `<label class="toggle"><input type="checkbox" data-wnet="${k}" ${w.nets[k] ? "checked" : ""}>${label}</label>`).join("")}</div>
+        <p class="small muted" style="margin:10px 0 6px">Check it on platforms without a free feed:</p>
+        <div class="row" style="gap:6px">${watchLaunchers(w.term)}</div></div>` : "";
+    $$("[data-wnet]").forEach((cb) => cb.addEventListener("change", () => {
+      w.nets[cb.dataset.wnet] = cb.checked;
+      const ids = syncWatch(w); save(); paintWatch();
+      if (ids.length) refreshAll(ids);
+    }));
+    const srcs = S.sources.filter((s) => s.watch && (!w || s.watch === w.id));
+    $("#watch-status").innerHTML = S.watches.length ? statusLine(srcs) : "";
+    if (!S.watches.length) {
+      list.innerHTML = `<div class="empty"><h3>Watch a story as it spreads</h3><p>Add a name, a place, a bill number, a phrase in quotes or a #hashtag. New mentions show up here from news sites and social platforms, newest first.</p>
+        <div class="row" style="justify-content:center;margin-top:10px">${["\"public records\"", "#pressfreedom", "FOIA lawsuit"].map((t) => `<button class="chip" type="button" data-watch-try="${esc(t)}">${esc(t)}</button>`).join("")}</div></div>`;
+      return;
+    }
+    const items = watchItems(w ? w.id : "all").slice(0, 200);
+    if (w) { w.seen = Date.now(); save(); }
+    if (!items.length) { list.innerHTML = `<div class="empty"><h3>${refreshing ? "Looking for mentions…" : "No mentions yet"}</h3><p>${refreshing ? "" : "Nothing found in the last few days. Try a shorter or broader term."}</p></div>`; return; }
+    list.innerHTML = `<div class="stack">${items.map((it) => {
+      const ww = w || S.watches.find((x) => S.sources.some((s) => s.id === it.sid && s.watch === x.id));
+      const term = ww ? ww.term.replace(/^#/, "").replace(/"/g, "") : "";
+      const shown = Object.assign({}, it, { _alerts: [...new Set(it._alerts.concat(term ? [term] : []))] });
+      return it.kind === "post" ? postHtml(shown) : `<div class="card" style="padding:4px 14px">${storyHtml(shown)}</div>`;
+    }).join("")}</div>`;
+  }
+
+  // Page watch: any web page, checked on refresh, with what changed since last time.
+  function pageSnapshot(html, url) {
+    const marked = html.replace(/<(script|style|noscript|svg|template)[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<(br|\/p|\/div|\/li|\/tr|\/h[1-6]|\/td|\/th|\/section|\/article|\/dd|\/dt)\b[^>]*>/gi, "\n$&");
+    const doc = new DOMParser().parseFromString(marked, "text/html");
+    const root = doc.querySelector("main, [role=main], #main, #content, article") || doc.body || doc.documentElement;
+    const seen = new Set();
+    const lines = (root.textContent || "").split("\n").map((l) => l.replace(/\s+/g, " ").trim())
+      .filter((l) => l.length > 2 && !/^[\d\s:\/.,-]+$/.test(l) && !seen.has(l) && seen.add(l)).slice(0, 1500);
+    const links = [], hrefs = new Set();
+    root.querySelectorAll("a[href]").forEach((a) => {
+      let href;
+      try { href = new URL(a.getAttribute("href"), url).href.replace(/#.*$/, ""); } catch (e) { return; }
+      if (!/^https?:/.test(href) || hrefs.has(href)) return;
+      hrefs.add(href);
+      links.push({ href, text: (a.textContent || "").replace(/\s+/g, " ").trim().slice(0, 140) || host(href) });
+    });
+    const feedEl = doc.querySelector('link[rel="alternate"][type*="rss"], link[rel="alternate"][type*="atom"]');
+    let feed = "";
+    if (feedEl) { try { feed = new URL(feedEl.getAttribute("href"), url).href; } catch (e) { /* ignore */ } }
+    const title = (doc.querySelector("title") || {}).textContent || "";
+    return { lines, links: links.slice(0, 400), feed, title: title.replace(/\s+/g, " ").trim().slice(0, 100) };
+  }
+  async function checkPage(pg) {
+    const html = await getText(pg.url, (t) => /<(html|body|div|p)[\s>]/i.test(t.slice(0, 20000)), 15000);
+    pg.checkedAt = Date.now();
+    if (!html) { pg.err = "Couldn't reach this page. Some sites block apps like this one; it'll keep trying."; return false; }
+    pg.err = "";
+    const snap = pageSnapshot(html, pg.url);
+    if (!pg.name) pg.name = snap.title || host(pg.url);
+    pg.feed = snap.feed;
+    if (!pg.lines) { pg.lines = snap.lines; pg.links = snap.links.map((l) => l.href); pg.changes = []; return false; }
+    const oldLines = new Set(pg.lines), oldLinks = new Set(pg.links);
+    const added = snap.lines.filter((l) => !oldLines.has(l));
+    const removed = pg.lines.filter((l) => !snap.lines.includes(l)).length;
+    const newLinks = snap.links.filter((l) => !oldLinks.has(l.href));
+    pg.lines = snap.lines; pg.links = snap.links.map((l) => l.href);
+    if (!added.length && !newLinks.length) return false;
+    pg.changes = [{ at: Date.now(), added: added.slice(0, 40), links: newLinks.slice(0, 40), removed }].concat(pg.changes || []).slice(0, 15);
+    pg.changedAt = Date.now();
+    return true;
+  }
+  async function checkPages(list) {
+    let changed = 0, i = 0;
+    const work = async () => {
+      while (i < list.length) {
+        const pg = list[i++];
+        try { if (await checkPage(pg)) changed++; } catch (e) { pg.err = "Couldn't read this page"; }
+        if (progress) progress.done++;
+      }
+    };
+    await Promise.all(Array.from({ length: 3 }, work));
+    return changed;
+  }
+  function paintPages() {
+    const list = $("#watch-list");
+    if (!list) return;
+    $("#watch-chips").innerHTML = ""; $("#watch-head").innerHTML = "";
+    $("#watch-status").innerHTML = refreshing ? "Checking pages…" : "";
+    if (!S.pages.length) {
+      list.innerHTML = `<div class="empty"><h3>Watch any page for changes</h3><p>Paste a link to a city council or school board agenda page, a police press release page, a court docket, or an agency's reports page. Each refresh checks it and shows what's new: new documents, new links and new text.</p>
+        <p class="small">Tip: many councils post agendas on Legistar (yourcity.legistar.com). Paste that calendar page here.</p></div>`;
+      return;
+    }
+    list.innerHTML = `<div class="stack">${S.pages.map((pg) => {
+      const fresh = pg.changedAt && pg.changedAt > (pg.seen || 0);
+      const last = (pg.changes || [])[0];
+      return `<article class="item" data-pg="${pg.id}">
+        <div class="item-meta">${fresh ? `<span class="pill hot">Updated ${ago(pg.changedAt)}${ago(pg.changedAt) === "now" ? "" : " ago"}</span>` : pg.changedAt ? `<span>Last change ${ago(pg.changedAt)} ago</span>` : `<span>No changes yet</span>`}
+          <span>${pg.checkedAt ? "checked " + ago(pg.checkedAt) + (ago(pg.checkedAt) === "now" ? "" : " ago") : "not checked yet"}</span></div>
+        <h3><a href="${esc(pg.url)}" target="_blank" rel="noopener">${esc(pg.name || host(pg.url))}</a></h3>
+        <p class="small muted">${esc(pg.url)}</p>
+        ${pg.err ? `<p class="small" style="color:var(--accent)">${esc(pg.err)}</p>` : ""}
+        ${pg.feed && !S.sources.some((s) => s.value === pg.feed) ? `<p class="small">This page has its own feed. <button class="linkish" type="button" data-act="pg-feed">Follow it on your Wire</button></p>` : ""}
+        ${last ? `<details${fresh ? " open" : ""}><summary class="small" style="cursor:pointer;font-weight:700">What changed ${ago(last.at)}${ago(last.at) === "now" ? "" : " ago"}: ${last.links.length} new link${last.links.length === 1 ? "" : "s"}, ${last.added.length} new line${last.added.length === 1 ? "" : "s"}${last.removed ? `, ${last.removed} removed` : ""}</summary>
+          ${last.links.length ? `<ul class="small" style="margin:6px 0;padding-left:18px">${last.links.slice(0, 12).map((l) => `<li><a href="${esc(l.href)}" target="_blank" rel="noopener">${esc(l.text)}</a></li>`).join("")}</ul>` : ""}
+          ${last.added.length ? `<div class="small" style="margin:6px 0;border-left:3px solid var(--good);padding-left:10px">${last.added.slice(0, 12).map((l) => `<div>+ ${esc(clip(l, 200))}</div>`).join("")}</div>` : ""}
+          ${(pg.changes || []).length > 1 ? `<p class="small muted" style="margin:4px 0 0">${pg.changes.length - 1} earlier change${pg.changes.length > 2 ? "s" : ""}: ${pg.changes.slice(1, 6).map((c) => ago(c.at)).join(", ")} ago</p>` : ""}
+        </details>` : ""}
+        <div class="row"><button class="btn sm" type="button" data-act="pg-check">${icon("refresh")}Check now</button>
+          ${fresh ? `<button class="btn sm" type="button" data-act="pg-seen">${icon("check")}Mark seen</button>` : ""}
+          <button class="btn sm ghost" type="button" data-act="pg-rename">Rename</button>
+          <button class="btn sm ghost danger" type="button" data-act="pg-del">Remove</button></div>
+      </article>`;
+    }).join("")}</div>`;
   }
 
   // Tools
@@ -1567,6 +1808,12 @@
     if (chip) { S.desk = chip.dataset.desk; wireLimit = 120; save(); paintWire(); return; }
     const sch = e.target.closest("[data-ssrc]");
     if (sch) { S.socialSrc = sch.dataset.ssrc; save(); paintSocial(); return; }
+    const wch = e.target.closest("[data-watch]");
+    if (wch) { S.watchSel = wch.dataset.watch; save(); paintWatch(); return; }
+    const wm = e.target.closest("[data-wmode]");
+    if (wm) { S.watchMode = wm.dataset.wmode; save(); renderWatch(); return; }
+    const wtry = e.target.closest("[data-watch-try]");
+    if (wtry) { const f = $("#watch-add"); f.term.value = wtry.dataset.watchTry; f.requestSubmit(); return; }
     const nb = e.target.closest("[data-nb]");
     if (nb) { S.nb = nb.dataset.nb; save(); renderNotebook(); return; }
     const pf = e.target.closest("[data-pf]");
@@ -1599,6 +1846,28 @@
       case "retry": refreshAll(S.sources.filter((s) => C[s.id] && C[s.id].err).map((s) => s.id)); break;
       case "settings": openSettings("add"); break;
       case "x-add": e.preventDefault(); addXSearch(); break;
+      case "pg-check": case "pg-seen": case "pg-rename": case "pg-del": case "pg-feed": {
+        const pg = S.pages.find((x) => x.id === actEl.closest("[data-pg]").dataset.pg);
+        if (!pg) break;
+        if (act === "pg-check") { actEl.disabled = true; actEl.textContent = "Checking…"; checkPage(pg).then((ch) => { save(); paintPages(); toast(pg.err ? "Couldn't reach it" : ch ? "It changed" : "No changes"); }); }
+        if (act === "pg-seen") { pg.seen = Date.now(); save(); renderWatch(); }
+        if (act === "pg-rename") { const n = prompt("Name", pg.name); if (n && n.trim()) { pg.name = n.trim(); save(); paintPages(); } }
+        if (act === "pg-del" && confirm("Stop watching " + (pg.name || pg.url) + "?")) { S.pages = S.pages.filter((x) => x !== pg); save(); renderWatch(); }
+        if (act === "pg-feed") {
+          if (!S.desks.length) S.desks.push({ id: uid(), name: "My desk" });
+          const src = { id: uid(), type: "rss", value: pg.feed, name: pg.name || host(pg.url), desk: S.desks[0].id, on: true };
+          S.sources.push(src); save(); refreshAll([src.id]); paintPages(); toast("Added to your Wire (" + S.desks[0].name + " desk)");
+        }
+        break;
+      }
+      case "watch-del": {
+        const w = S.watches.find((x) => x.id === S.watchSel);
+        if (!w || !confirm("Stop watching " + w.term + "?")) break;
+        S.sources.filter((x) => x.watch === w.id).forEach((x) => delete C[x.id]);
+        S.sources = S.sources.filter((x) => x.watch !== w.id);
+        S.watches = S.watches.filter((x) => x !== w); S.watchSel = "all";
+        save(); saveCache(); paintWatch(); break;
+      }
       case "x-del": e.preventDefault(); e.stopPropagation(); S.xSearches = S.xSearches.filter((x) => x.id !== actEl.dataset.id); save(); paintX(); break;
       case "pitch-new": pitchEditor(null); break;
       case "pitch-edit": pitchEditor(pitch); break;
