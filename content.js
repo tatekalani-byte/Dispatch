@@ -360,3 +360,68 @@ window.DISPATCH_PRACTICE_FACTS = [
   "Facts: University announces tuition rises 9% next year, largest increase in 15 years. Board approved Thursday. In-state tuition will be $14,200. Student government called for a walkout.",
   "Facts: Records obtained by request: city police paid $4.7 million in misconduct settlements over 5 years. 60% involved 11 officers. 8 of those officers are still on the force.",
 ];
+
+// Approximate political lean of outlets' news coverage, on a five-point scale, drawn from
+// public media-bias ratings such as AllSides and Ad Fontes Media. Ratings are judgment calls,
+// change over time and differ between raters, so the app labels them "approximate" and lets
+// the reader change any of them. Keys are outlet names as they appear in feeds; the domain
+// list helps match outlets that show up under a different name.
+// L = left, LL = lean left, C = center, LR = lean right, R = right.
+window.DISPATCH_LEANS = {
+  L: [
+    ["HuffPost", "huffpost.com"], ["MSNBC", "msnbc.com"], ["The Intercept", "theintercept.com"], ["Vox", "vox.com"],
+    ["Mother Jones", "motherjones.com"], ["The Nation", "thenation.com"], ["Jacobin", "jacobin.com"],
+    ["Democracy Now!", "democracynow.org"], ["Slate", "slate.com"], ["The Daily Beast", "thedailybeast.com"],
+    ["The New Yorker", "newyorker.com"], ["Rolling Stone", "rollingstone.com"], ["Salon", "salon.com"],
+    ["The New Republic", "newrepublic.com"], ["Common Dreams", "commondreams.org"],
+  ],
+  LL: [
+    ["The New York Times", "nytimes.com"], ["The Washington Post", "washingtonpost.com"], ["NPR", "npr.org"],
+    ["CNN", "cnn.com"], ["NBC News", "nbcnews.com"], ["CBS News", "cbsnews.com"], ["ABC News", "abcnews.go.com"],
+    ["Associated Press", "apnews.com"], ["Bloomberg", "bloomberg.com"], ["The Guardian", "theguardian.com"],
+    ["Politico", "politico.com"], ["Axios", "axios.com"], ["TIME", "time.com"], ["The Atlantic", "theatlantic.com"],
+    ["Los Angeles Times", "latimes.com"], ["USA Today", "usatoday.com"], ["Business Insider", "businessinsider.com"],
+    ["ProPublica", "propublica.org"], ["Al Jazeera", "aljazeera.com"], ["Yahoo News", "news.yahoo.com"],
+    ["The Independent", "independent.co.uk"], ["PBS NewsHour", "pbs.org"], ["Vanity Fair", "vanityfair.com"],
+  ],
+  C: [
+    ["Reuters", "reuters.com"], ["BBC News", "bbc.com"], ["The Hill", "thehill.com"],
+    ["The Wall Street Journal", "wsj.com"], ["Forbes", "forbes.com"], ["MarketWatch", "marketwatch.com"],
+    ["The Christian Science Monitor", "csmonitor.com"], ["NewsNation", "newsnationnow.com"], ["Newsweek", "newsweek.com"],
+  ],
+  LR: [
+    ["New York Post", "nypost.com"], ["Washington Examiner", "washingtonexaminer.com"],
+    ["The Washington Times", "washingtontimes.com"], ["Reason", "reason.com"], ["The Dispatch", "thedispatch.com"],
+    ["The Free Press", "thefp.com"], ["Fox Business", "foxbusiness.com"], ["RealClearPolitics", "realclearpolitics.com"],
+    ["The Telegraph", "telegraph.co.uk"], ["Daily Mail", "dailymail.co.uk"],
+  ],
+  R: [
+    ["Fox News", "foxnews.com"], ["Breitbart", "breitbart.com"], ["The Daily Wire", "dailywire.com"],
+    ["Newsmax", "newsmax.com"], ["The Federalist", "thefederalist.com"], ["National Review", "nationalreview.com"],
+    ["The Daily Caller", "dailycaller.com"], ["TheBlaze", "theblaze.com"], ["One America News", "oann.com"],
+    ["The Epoch Times", "theepochtimes.com"], ["Washington Free Beacon", "freebeacon.com"], ["Townhall", "townhall.com"],
+    ["PJ Media", "pjmedia.com"], ["The Gateway Pundit", "thegatewaypundit.com"],
+  ],
+};
+window.DISPATCH_LEAN_LABELS = { L: "Left", LL: "Lean left", C: "Center", LR: "Lean right", R: "Right" };
+// Extra names feeds use for the same outlets.
+window.DISPATCH_LEAN_ALIASES = {
+  "ap news": "Associated Press", "ap": "Associated Press", "the associated press": "Associated Press",
+  "nytimes": "The New York Times", "new york times": "The New York Times", "washington post": "The Washington Post",
+  "bbc": "BBC News", "bbc world": "BBC News", "msnbc news": "MSNBC", "usa today": "USA Today", "time": "TIME",
+  "wsj": "The Wall Street Journal", "wall street journal": "The Wall Street Journal", "bloomberg.com": "Bloomberg",
+  "npr news": "NPR", "fox news channel": "Fox News", "daily wire": "The Daily Wire", "the guardian world": "The Guardian",
+  "guardian": "The Guardian", "pbs": "PBS NewsHour", "ny post": "New York Post", "the new york post": "New York Post",
+  "the free beacon": "Washington Free Beacon", "the blaze": "TheBlaze", "epoch times": "The Epoch Times",
+};
+
+// Words that signal slant or sensationalism in a headline. [pattern, category, note]
+window.DISPATCH_LOADED = [
+  ["\\b(slams?|slammed|blasts?|blasted|rips?|ripped|torches|torched|eviscerates?|destroys?|demolishes|obliterates?|owns|owned|shreds?)\\b", "Combat verb", "Turns disagreement into a fight. What did they actually say?"],
+  ["\\b(meltdown|chaos|frenzy|firestorm|bombshell|explosive|shocking|stunning|jaw-dropping|outrageous|disaster|catastrophic|nightmare|unhinged)\\b", "Sensational", "Emotion instead of information."],
+  ["\\b(admits?|admitted|concedes?|conceded|confesses?|claims?|claimed|insists?|insisted|alleges?|refuses?|refused|caves?|caved)\\b", "Slanted attribution", "Implies the writer's judgment of the speaker. Neutral: \"said.\""],
+  ["\\b(radical|extremist|far-left|far-right|ultra-left|ultra-right|militant|fringe|woke|regime|thugs?|elites?)\\b", "Loaded label", "A characterization, not a fact. Who says so?"],
+  ["\\bso-called\\b", "Scare phrase", "Signals doubt without saying why."],
+  ["\\b(illegal aliens?|illegals|undocumented immigrants?|pro-life|pro-choice|anti-abortion|abortion rights|gun rights|gun control|death tax|tax relief|climate denier|climate alarmist)\\b", "Contested term", "Each side prefers its own wording. Notice whose term is used."],
+  ["\\b(furious|fury|outrage|outraged|livid|seething|panic|panicked|desperate|humiliat\\w*)\\b", "Emotional framing", "Describes feelings the reporter probably can't verify."],
+];
