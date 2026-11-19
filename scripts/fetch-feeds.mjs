@@ -53,7 +53,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_ITEMS = 30;
 
 // Trim a feed to its newest items and drop full-article bodies, so feeds.json stays small.
+const decode = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&amp;/g, "&");
+const hasImage = (block) => /<(media:thumbnail|media:content)[^>]+url=|<enclosure[^>]+type=["']image/i.test(block);
+// Each story keeps one picture: when the feed only has it inside the article body (which is
+// dropped to save space), it's moved into an <enclosure> the app reads.
+function keepImages(xml) {
+  return xml.replace(/<(item|entry)[\s>][\s\S]*?<\/\1>/g, (block) => {
+    if (hasImage(block)) return block;
+    const body = decode((block.match(/<content:encoded>([\s\S]*?)<\/content:encoded>/) || [])[1] || (block.match(/<(description|summary|content)[^>]*>([\s\S]*?)<\/\1>/) || [])[2] || "");
+    const m = /<img[^>]+src=["']([^"']+)["']/i.exec(body.replace(/<!\[CDATA\[|\]\]>/g, ""));
+    if (!m || !/^https?:/.test(m[1]) || /feedburner|pixel|tracking|1x1|gravatar/i.test(m[1])) return block;
+    const url = m[1].replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    return block.replace(/<\/(item|entry)>$/, `<enclosure url="${url}" type="image/jpeg" length="0"/></$1>`);
+  });
+}
+function itemLinks(xml) {
+  const out = [];
+  for (const m of xml.matchAll(/<(item|entry)[\s>][\s\S]*?<\/\1>/g)) {
+    if (hasImage(m[0])) continue;
+    const link = (m[0].match(/<link>([^<]+)<\/link>/) || m[0].match(/<link[^>]+href=["']([^"']+)["']/) || [])[1];
+    if (link) out.push(decode(link.trim()));
+  }
+  return out;
+}
 function trim(xml) {
+  xml = keepImages(xml);
   xml = xml.replace(/<content:encoded>[\s\S]*?<\/content:encoded>/g, "");
   const isAtom = /<feed[\s>]/i.test(xml.slice(0, 3000));
   const close = isAtom ? "</entry>" : "</item>";
@@ -111,15 +135,44 @@ await Promise.all([
   })(),
 ]);
 
-let previous = {};
-try { previous = JSON.parse(fs.readFileSync(process.argv[3], "utf8")).feeds || {}; } catch (e) { /* first run */ }
+let previousFile = {};
+try { previousFile = JSON.parse(fs.readFileSync(process.argv[3], "utf8")); } catch (e) { /* first run */ }
+const previous = previousFile.feeds || {};
 for (const u of urls) {
   const old = previous[u];
   if (!feeds[u].ok && old && old.ok) feeds[u] = { ...old, stale: feeds[u].error, fetchedAt: old.fetchedAt || null };
   else if (feeds[u].ok) feeds[u].fetchedAt = new Date().toISOString();
 }
 
-const out = { generatedAt: new Date().toISOString(), feeds };
+// Stories without a picture in their feed get the preview image the article itself shares
+// (og:image). Found images are remembered between runs, so each article is looked up once.
+const images = {};
+const known = previousFile.images || {};
+const todo = [];
+for (const u of urls) {
+  const f = feeds[u];
+  if (!f.ok || /reddit\.com|news\.google\.com/.test(u)) continue;
+  for (const link of itemLinks(f.text).slice(0, 8)) {
+    if (known[link] !== undefined) images[link] = known[link];
+    else if (/^https?:/.test(link) && !/news\.google\.com|reddit\.com|youtube\.com/.test(link)) todo.push(link);
+  }
+}
+let found = 0, j = 0;
+await Promise.all(Array.from({ length: 8 }, async () => {
+  while (j < Math.min(todo.length, 200)) {
+    const link = todo[j++];
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const r = await fetch(link, { signal: ctl.signal, redirect: "follow", headers: { "user-agent": AGENTS[0], accept: "text/html" } });
+      const head = (await r.text()).slice(0, 200000);
+      const m = head.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)(?::src)?["'][^>]*content=["']([^"']+)["']/i) || head.match(/<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|twitter:image)["']/i);
+      images[link] = m ? new URL(decode(m[1]), link).href : "";
+      if (m) found++;
+    } catch (e) { images[link] = ""; } finally { clearTimeout(t); }
+  }
+}));
+
+const out = { generatedAt: new Date().toISOString(), feeds, images };
 fs.writeFileSync(process.argv[2] || "feeds.json", JSON.stringify(out));
 
 const bad = urls.filter((u) => !feeds[u].ok);
@@ -127,4 +180,5 @@ for (const u of urls) {
   const f = feeds[u];
   console.log((f.stale ? "KEPT  " : f.ok ? "OK    " : "FAIL  ") + wanted.get(u).padEnd(34) + " " + (f.stale ? "kept last copy (" + f.stale + ")" : f.ok ? f.items + " items" : f.error) + "  " + u);
 }
+console.log(`\nPreview images: ${Object.values(images).filter(Boolean).length} stories have one (${found} found this run).`);
 console.log(`\n${urls.length - bad.length} of ${urls.length} feeds fetched. feeds.json is ${Math.round(fs.statSync(process.argv[2] || "feeds.json").size / 1024)} KB.`);

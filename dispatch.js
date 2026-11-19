@@ -97,7 +97,7 @@
   }
   function fresh() {
     const s = {
-      v: 3, desks: [], sources: [],
+      v: 4, desks: [], sources: [],
       xSearches: window.DISPATCH_X_SEARCHES.map((x) => ({ id: uid(), label: x.label, q: x.q })),
       watches: [], watchSel: "all", pages: [], watchMode: "keywords", leanOverrides: {}, showLean: true,
       alerts: ["FOIA", "subpoena", "leaked", "whistleblower", "lawsuit"], mutes: [],
@@ -109,26 +109,60 @@
     return s;
   }
   function loadJSON(k) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
-  let S = loadJSON(KEY);
-  if (!S || !Array.isArray(S.sources)) S = fresh();
-  S = Object.assign(fresh(), S, S.desks ? {} : { desks: [] });
-  // Version 2 added Substack newsletters and made Reddit part of Social.
-  if (S.v < 2) { ["substack", "community"].forEach((id) => addPack(S, id)); S.v = 2; }
-  // Version 3 dropped Garbage Day, whose feed no longer exists.
-  if (S.v < 3) { S.sources = S.sources.filter((x) => !(x.type === "substack" && x.value === "www.garbageday.email")); S.v = 3; }
-  let C = loadJSON(CACHE_KEY) || {}; // sourceId -> { at, items, err }
-
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(S)); }
-    catch (e) { toast("Storage is full. Save a backup, then delete old clips."); }
+  // Storage. Everything lives in IndexedDB, which has far more room than localStorage. The apps on
+  // this site share one localStorage allowance, and when it filled up, saves failed and Dispatch
+  // opened empty every time. localStorage is now only a fallback.
+  const idb = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((res, rej) => {
+      const r = indexedDB.open("dispatch", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    }));
+    const run = (mode, fn) => open().then((db) => new Promise((res, rej) => {
+      const tx = db.transaction("kv", mode); const q = fn(tx.objectStore("kv"));
+      tx.oncomplete = () => res(q && q.result); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    }));
+    return { get: (k) => run("readonly", (st) => st.get(k)), set: (k, v) => run("readwrite", (st) => st.put(v, k)) };
+  })();
+  function upgrade(s) {
+    if (!s || !Array.isArray(s.sources)) s = fresh();
+    s = Object.assign(fresh(), s, s.desks ? {} : { desks: [] });
+    // Version 2 added Substack newsletters and made Reddit part of Social.
+    if (s.v < 2) { ["substack", "community"].forEach((id) => addPack(s, id)); s.v = 2; }
+    // Version 3 dropped Garbage Day, whose feed no longer exists.
+    if (s.v < 3) { s.sources = s.sources.filter((x) => !(x.type === "substack" && x.value === "www.garbageday.email")); s.v = 3; }
+    // Version 4 added the Breaking desk.
+    if (s.v < 4) { addPack(s, "breaking"); s.desks.sort((x, y) => (x.name === "Breaking" ? -1 : y.name === "Breaking" ? 1 : 0)); s.v = 4; }
+    return s;
   }
-  function saveCache() {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(C)); }
-    catch (e) { // cache is disposable; drop the oldest half and try again
-      const ids = Object.keys(C).sort((a, b) => (C[a].at || 0) - (C[b].at || 0));
-      ids.slice(0, Math.ceil(ids.length / 2)).forEach((id) => delete C[id]);
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(C)); } catch (err) { /* give up quietly */ }
+  let S = upgrade(loadJSON(KEY));
+  let C = {}; // sourceId -> { at, items, err }; loaded from IndexedDB at start
+
+  let saveTimer = null, storageWarned = false;
+  function save(fromSync) {
+    if (!fromSync) S.updatedAt = Date.now();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      idb.set("state", JSON.parse(JSON.stringify(S))).catch(() => {
+        if (!storageWarned) { storageWarned = true; toast("Couldn't save on this device. Use Settings, Save backup file."); }
+      });
+      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { try { localStorage.removeItem(CACHE_KEY); } catch (err) { /* ignore */ } }
+      if (!fromSync && window.DispatchSync) window.DispatchSync.changed();
+    }, 150);
+  }
+  // Write right away when the app is put away, so nothing is lost if it's closed mid-save.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && saveTimer) {
+      clearTimeout(saveTimer); saveTimer = null;
+      idb.set("state", JSON.parse(JSON.stringify(S))).catch(() => {});
+      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignore */ }
+      if (window.DispatchSync) window.DispatchSync.changed(true);
     }
+  });
+  function saveCache() {
+    idb.set("cache", C).catch(() => { /* the cache is disposable */ });
   }
   function pruneRead() {
     const ids = Object.keys(S.read);
@@ -212,7 +246,7 @@
       const date = Date.parse(firstTag(el, "pubDate", "published", "updated", "dc:date")) || 0;
       let outlet = src.name, outletUrl = "";
       let summary = clip(stripHtml(html), 280);
-      if (src.type === "gnews") {
+      if (src.type === "gnews" || (el.getElementsByTagName("source")[0] && /news\.google\./.test(link))) {
         const so = el.getElementsByTagName("source")[0];
         const name = so ? so.textContent.trim() : "";
         if (so && so.getAttribute("url")) outletUrl = so.getAttribute("url");
@@ -241,6 +275,7 @@
     }
     return "https://raw.githubusercontent.com/tatekalani-byte/Dispatch/feed-data/feeds.json";
   }
+  let bundleImages = {};
   let bundle = null, bundleAt = 0, bundleMade = 0, bundleLoading = null;
   // GitHub runs scheduled jobs late or skips them when it's busy. Past this age the app fetches
   // feeds live first and keeps the snapshot as a backup.
@@ -250,7 +285,7 @@
     if (!force && bundle && Date.now() - bundleAt < 5 * 60e3) return Promise.resolve();
     if (!bundleLoading) {
       bundleLoading = timed(bundleUrl(), 15000, { cache: "no-cache" })
-        .then((t) => { const j = JSON.parse(t); bundle = j.feeds || {}; bundleMade = Date.parse(j.generatedAt) || 0; bundleAt = Date.now(); })
+        .then((t) => { const j = JSON.parse(t); bundle = j.feeds || {}; bundleImages = j.images || {}; bundleMade = Date.parse(j.generatedAt) || 0; bundleAt = Date.now(); })
         .catch(() => { /* fall back to proxies */ })
         .finally(() => { bundleLoading = null; });
     }
@@ -261,9 +296,10 @@
   async function fetchRss(src) {
     const url = feedUrl(src);
     const bundled = fromBundle(url);
-    if (bundled && bundleFresh()) return parseFeed(bundled, src);
-    try { return await fetchRssLive(url, src); }
-    catch (e) { if (bundled) return parseFeed(bundled, src); throw e; }
+    const withImages = (items) => items.map((it) => (it.image || !bundleImages[it.link] ? it : Object.assign(it, { image: bundleImages[it.link] })));
+    if (bundled && bundleFresh()) return withImages(parseFeed(bundled, src));
+    try { return withImages(await fetchRssLive(url, src)); }
+    catch (e) { if (bundled) return withImages(parseFeed(bundled, src)); throw e; }
   }
   async function fetchRssLive(url, src) {
     // The proxies and rss2json (which turns a feed into JSON on its own servers) race each other.
@@ -430,7 +466,7 @@
     } finally {
       refreshing = false; progress = null;
       $("#refresh-btn").classList.remove("spin");
-      save(); saveCache(); paintLists();
+      save(true); saveCache(); paintLists();
     }
     if (manual) {
       const fresh = allItems(false).concat(allItems(true)).filter((it) => !before.has(it.id)).length;
@@ -487,7 +523,7 @@
   let wireQuery = "", wireLimit = 120, clipQuery = "";
 
   function setTab(tab) {
-    S.tab = tab; save();
+    S.tab = tab; save(true);
     $$(".nav button").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
     ({ wire: renderWire, watch: renderWatch, social: renderSocial, tools: renderTools, notebook: renderNotebook, learn: renderLearn })[tab]();
     window.scrollTo(0, 0);
@@ -561,7 +597,16 @@
     const now = Date.now(), today = new Date().setHours(0, 0, 0, 0);
     const bucket = (d) => !d ? "Undated" : now - d < 3600e3 ? "The past hour" : d >= today ? "Earlier today" : d >= today - 864e5 ? "Yesterday" : d >= today - 6 * 864e5 ? "This week" : "Older";
     let html = "", last = "";
-    items.slice(0, wireLimit).forEach((it) => {
+    const front = S.desk === "all" && !wireQuery.trim() && !S.alertsOnly;
+    let shown = items;
+    if (front) {
+      const clusters = breakingClusters();
+      const inBreaking = new Set(clusters.flatMap((c) => c.items.map((x) => x.id)));
+      html += breakingHtml(clusters);
+      const lead = items.find((it) => it.image && now - it.date < 12 * 3600e3 && !S.read[it.id] && !inBreaking.has(it.id));
+      if (lead) { html += `<h3 class="group-h">Top story</h3>` + storyHtml(lead, true); shown = items.filter((x) => x !== lead); }
+    }
+    shown.slice(0, wireLimit).forEach((it) => {
       const b = bucket(it.date);
       if (b !== last) { html += `<h3 class="group-h">${b}</h3>`; last = b; }
       html += storyHtml(it);
@@ -569,14 +614,69 @@
     if (items.length > wireLimit) html += `<div style="text-align:center;padding:16px"><button class="btn" type="button" data-act="more">Show ${Math.min(120, items.length - wireLimit)} more</button></div>`;
     list.innerHTML = html;
   }
-  function storyHtml(it) {
+  // Breaking news: stories from the last few hours that several outlets are reporting at once,
+  // plus anything an outlet itself labels breaking.
+  const BREAK_WINDOW = 3 * 3600e3;
+  const sigWords = (t) => new Set(String(t).toLowerCase().replace(/[’']s\b/g, "").replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 3 && !STOP.has(w)));
+  function breakingClusters() {
+    const now = Date.now();
+    const pool = itemsWhere((s) => !s.watch).filter((it) => it.date && now - it.date < BREAK_WINDOW && (it.title || it.text));
+    const clusters = [];
+    pool.forEach((it) => {
+      const text = it.title || clip(it.text, 160);
+      const w = sigWords(text);
+      if (w.size < 3) return;
+      let best = null, bestScore = 0;
+      clusters.forEach((c) => {
+        let shared = 0; w.forEach((x) => { if (c.words.has(x)) shared++; });
+        const score = shared / Math.min(w.size, c.words.size);
+        if (shared >= 3 && score > bestScore) { best = c; bestScore = score; }
+      });
+      if (best && bestScore >= 0.4) { best.items.push(it); w.forEach((x) => best.words.add(x)); }
+      else clusters.push({ items: [it], words: w });
+    });
+    return clusters.map((c) => {
+      const outlets = new Set(c.items.map((x) => normOutlet(x.outlet || x.handle || x.net)));
+      const flagged = c.items.some((x) => /\b(breaking|just in|developing|live updates?)\b/i.test(x.title || x.text || ""));
+      const lead = c.items.slice().sort((a, b) => (b.image ? 1 : 0) - (a.image ? 1 : 0) || a.date - b.date)[0];
+      return { items: c.items.sort((a, b) => b.date - a.date), outlets: outlets.size, flagged, lead, first: Math.min(...c.items.map((x) => x.date)), latest: Math.max(...c.items.map((x) => x.date)) };
+    }).filter((c) => c.outlets >= 3 || (c.flagged && c.outlets >= 1 && c.items.some((x) => x.kind === "article" || /\b(breaking|just in)\b/i.test(x.text || ""))))
+      .sort((a, b) => (b.outlets * 2 + (b.flagged ? 2 : 0) - (Date.now() - b.latest) / 1800e3) - (a.outlets * 2 + (a.flagged ? 2 : 0) - (Date.now() - a.latest) / 1800e3))
+      .slice(0, 5);
+  }
+  function breakingHtml(cl) {
+    if (!cl.length) return "";
+    return `<section class="breaking" aria-label="Breaking news">
+      <div class="breaking-head"><span class="pulse"></span>Breaking<span class="muted small">${cl.length} developing ${cl.length === 1 ? "story" : "stories"} in the last 3 hours</span></div>
+      ${cl.map((c, i) => {
+        const it = c.lead, title = it.title || clip(it.text, 140);
+        return `<article class="break-item${i === 0 ? " top" : ""}" data-id="${esc(it.id)}">
+          ${i === 0 && it.image ? `<img class="break-img" src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
+          <div class="break-meta">${c.outlets} outlet${c.outlets === 1 ? "" : "s"} · first seen ${ago(c.first)} ago${c.items.length > 1 ? " · updated " + ago(c.latest) + (ago(c.latest) === "now" ? "" : " ago") : ""}</div>
+          <a class="break-title" href="${esc(it.link)}" target="_blank" rel="noopener" data-open>${esc(title)}</a>
+          ${c.items.length > 1 ? `<details class="break-more"><summary>How ${c.items.length} reports cover it</summary><ul>${c.items.slice(0, 8).map((x) => `<li><b>${esc(x.outlet || x.author)}</b> ${leanBadge(x)} <a href="${esc(x.link)}" target="_blank" rel="noopener" data-open>${esc(x.title || clip(x.text, 120))}</a> <span class="muted">${ago(x.date)}</span></li>`).join("")}</ul></details>` : ""}
+          <div class="row" style="gap:4px;margin-top:6px">${it.kind === "article" ? `<button class="act" type="button" data-act="coverage">${icon("scale")}Coverage</button>` : ""}<button class="act" type="button" data-act="watch-story">${icon("eye")}Watch this</button><button class="act" type="button" data-act="save" aria-pressed="${!!clipFor(it.link)}">${icon("bookmark")}Save</button></div>
+        </article>`;
+      }).join("")}
+    </section>`;
+  }
+  function outletDomain(it) {
+    const h = host(it.outletUrl || "") || (!/news\.google\.|reddit\.com|ycombinator/.test(it.link) ? host(it.link) : "");
+    return h;
+  }
+  function logoHtml(it) {
+    const d = outletDomain(it);
+    return d ? `<img class="logo" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(d)}&sz=64" alt="" loading="lazy" onerror="this.remove()">` : "";
+  }
+  function storyHtml(it, lead) {
     const saved = !!clipFor(it.link);
     const q = wireQuery.trim();
-    return `<article class="story${S.read[it.id] ? " read" : ""}" data-id="${esc(it.id)}">
-      <div class="story-meta"><span class="src">${esc(it.outlet)}</span>${leanBadge(it)}<span>${ago(it.date)}</span>${it._alerts.map((a) => `<span class="alert">⚑ ${esc(a)}</span>`).join("")}</div>
+    return `<article class="story${S.read[it.id] ? " read" : ""}${lead && it.image ? " lead" : ""}${it.image ? " has-img" : ""}" data-id="${esc(it.id)}">
+      ${lead && it.image ? `<a class="lead-img" href="${esc(it.link)}" target="_blank" rel="noopener" data-open><img src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.story').classList.remove('lead');this.parentNode.remove()"></a>` : ""}
+      <div class="story-meta">${logoHtml(it)}<span class="src">${esc(it.outlet)}</span>${leanBadge(it)}<span>${ago(it.date)}</span>${it._alerts.map((a) => `<span class="alert">⚑ ${esc(a)}</span>`).join("")}</div>
       <div><a class="story-title" href="${esc(it.link)}" target="_blank" rel="noopener" data-open>${highlight(it.title, it._alerts, q)}</a>
       ${it.summary ? `<p class="story-sum">${highlight(it.summary, it._alerts, q)}</p>` : ""}</div>
-      ${it.image ? `<img class="story-img" src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}
+      ${it.image && !lead ? `<img class="story-img" src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.story').classList.remove('has-img');this.remove()">` : ""}
       <div class="story-actions">
         <button class="act" type="button" data-act="save" aria-pressed="${saved}">${icon("bookmark")}${saved ? "Saved" : "Save"}</button>
         <button class="act" type="button" data-act="cite">${icon("copy")}Cite</button>
@@ -770,7 +870,7 @@
       return;
     }
     const items = watchItems(w ? w.id : "all").slice(0, 200);
-    if (w) { w.seen = Date.now(); save(); }
+    if (w) { w.seen = Date.now(); save(true); }
     if (!items.length) { list.innerHTML = `<div class="empty"><h3>${refreshing ? "Looking for mentions…" : "No mentions yet"}</h3><p>${refreshing ? "" : "Nothing found in the last few days. Try a shorter or broader term."}</p></div>`; return; }
     list.innerHTML = `<div class="stack">${items.map((it) => {
       const ww = w || S.watches.find((x) => S.sources.some((s) => s.id === it.sid && s.watch === x.id));
@@ -1362,6 +1462,116 @@
   }
   let drillIdx = null;
   function lessonScore(id) { return S.practice && S.practice[id]; }
+  // ---------- 12-week plan ----------
+  const PLAN = () => window.DISPATCH_PLAN || [];
+  const lessonById = (id) => window.DISPATCH_LESSONS.find((l) => l.id === id);
+  const dayMs = (k) => new Date(k + "T00:00").getTime();
+  function weekStart(w) { return (S.plan && S.plan.weekStarted && S.plan.weekStarted[w]) || Date.now(); }
+  function taskState(w, i) {
+    const t = PLAN()[w].tasks[i], key = w + ":" + i, done = S.plan.done || {};
+    if (done[key]) return { done: true };
+    const since = weekStart(w);
+    if (t.kind === "pass") { const p = S.practice && S.practice[t.lesson]; return { done: !!(p && p.best >= 70), note: p ? "Best " + p.best + "%" : "" }; }
+    if (t.kind === "drill") {
+      const need = t.drill === "lede" ? 3 : 1;
+      const n = (S.drillLog || []).filter((d) => d.kind === t.drill && d.at >= since).length;
+      return { done: n >= need, note: need > 1 ? Math.min(n, need) + " of " + need : "" };
+    }
+    if (t.kind === "habit") {
+      const n = Object.keys(S.days || {}).filter((d) => S.days[d] > 0 && dayMs(d) >= new Date(since).setHours(0, 0, 0, 0)).length;
+      return { done: n >= 5, note: Math.min(n, 5) + " of 5 days" };
+    }
+    return { done: false };
+  }
+  function taskLabel(t) {
+    if (t.kind === "pass") { const l = lessonById(t.lesson); return "Pass the lesson: " + (l ? l.title : t.lesson); }
+    if (t.kind === "habit") return "Read stories on your Wire on 5 days";
+    return t.label;
+  }
+  function planProgress() {
+    let total = 0, done = 0;
+    PLAN().forEach((wk, w) => wk.tasks.forEach((t, i) => { total++; if (S.plan && taskState(w, i).done) done++; }));
+    return { total, done };
+  }
+  function currentWeek() {
+    const P = PLAN();
+    for (let w = 0; w < P.length; w++) if (P[w].tasks.some((t, i) => !taskState(w, i).done)) return w;
+    return P.length;
+  }
+  function syncPlan() {
+    // Lock in completed tasks, and start the clock on the current week.
+    if (!S.plan || !S.plan.start) return;
+    S.plan.done = S.plan.done || {}; S.plan.weekStarted = S.plan.weekStarted || {};
+    let changed = false;
+    PLAN().forEach((wk, w) => wk.tasks.forEach((t, i) => {
+      const key = w + ":" + i;
+      if (!S.plan.done[key] && S.plan.weekStarted[w] && taskState(w, i).done) { S.plan.done[key] = Date.now(); changed = true; }
+    }));
+    const cw = currentWeek();
+    if (cw < PLAN().length && !S.plan.weekStarted[cw]) { S.plan.weekStarted[cw] = Date.now(); changed = true; }
+    if (changed) save(true);
+  }
+  function taskRowHtml(w, i, compact) {
+    const t = PLAN()[w].tasks[i], st = taskState(w, i), key = w + ":" + i;
+    let action = "";
+    if (!compact && !st.done) {
+      if (t.kind === "pass") action = `<button class="btn sm" type="button" data-plan-lesson="${t.lesson}">Open lesson</button>`;
+      else if (t.kind === "drill") action = `<button class="btn sm" type="button" data-drill="${t.drill}">Do it</button>`;
+      else if (t.kind === "habit") action = `<button class="btn sm" type="button" data-tab="wire">Open Wire</button>`;
+      else action = `<button class="btn sm" type="button" data-plan-feedback="${key}">Get feedback</button><button class="btn sm ghost" type="button" data-plan-done="${key}">Mark done</button>`;
+    } else if (!compact && st.done && t.kind === "assignment") action = `<button class="btn sm ghost" type="button" data-plan-undo="${key}">Undo</button>`;
+    return `<li class="plan-task${st.done ? " done" : ""}"><span class="dot">${st.done ? icon("check") : ""}</span>
+      <div class="grow"><div>${esc(taskLabel(t))}</div>${st.note && !st.done ? `<div class="small muted">${esc(st.note)}</div>` : ""}${action ? `<div class="row" style="gap:6px;margin-top:6px">${action}</div>` : ""}</div></li>`;
+  }
+  function planCardHtml() {
+    const P = PLAN();
+    if (!P.length) return "";
+    if (!S.plan || !S.plan.start) {
+      return `<section class="plan-card">
+        <div class="eyebrow">Your lesson plan</div>
+        <h2>12 weeks to your first published story</h2>
+        <p>A week-by-week course: lessons with practice, daily drills on real news, and real reporting assignments, from spotting a story to pitching an editor. About 3 to 4 hours a week.</p>
+        <ol class="plan-weeks">${P.map((wk, w) => `<li><b>Week ${w + 1}</b> ${esc(wk.title)}</li>`).join("")}</ol>
+        <button class="btn primary" type="button" id="plan-start">Start week 1</button>
+      </section>`;
+    }
+    syncPlan();
+    const pr = planProgress(), cw = currentWeek();
+    if (cw >= P.length) {
+      return `<section class="plan-card"><div class="eyebrow">Your lesson plan</div><h2>You finished all 12 weeks.</h2>
+        <p>That's a full intro to reporting. Keep your beat, keep pitching, and keep a Wire habit.</p>
+        <button class="btn" type="button" id="plan-all">See the whole plan</button></section>`;
+    }
+    const wk = P[cw];
+    return `<section class="plan-card">
+      <div class="row" style="justify-content:space-between"><div class="eyebrow">Week ${cw + 1} of ${P.length}</div><div class="small muted">${pr.done} of ${pr.total} tasks done</div></div>
+      <div class="meter" style="margin:6px 0 10px"><i style="width:${Math.round((pr.done / pr.total) * 100)}%"></i></div>
+      <h2>${esc(wk.title)}</h2>
+      <p>${esc(wk.goal)}</p>
+      <ul class="plan-tasks">${wk.tasks.map((t, i) => taskRowHtml(cw, i)).join("")}</ul>
+      <button class="btn ghost sm" type="button" id="plan-all">See the whole plan</button>
+    </section>`;
+  }
+  function openPlan() {
+    const P = PLAN(), cw = currentWeek();
+    openSheet("12-week plan", `<div class="stack">${P.map((wk, w) => {
+      const n = wk.tasks.filter((t, i) => taskState(w, i).done).length;
+      return `<details class="plan-week"${w === cw ? " open" : ""}><summary><b>Week ${w + 1}: ${esc(wk.title)}</b> <span class="small muted">${n}/${wk.tasks.length}${w === cw ? " · this week" : ""}</span></summary>
+        <p class="small muted" style="margin:4px 0 8px">${esc(wk.goal)}</p><ul class="plan-tasks">${wk.tasks.map((t, i) => taskRowHtml(w, i, w > cw)).join("")}</ul></details>`;
+    }).join("")}
+    ${S.plan && S.plan.start ? `<button class="btn sm ghost danger" type="button" id="plan-reset">Restart the plan</button>` : ""}</div>`, () => {
+      const r = $("#plan-reset");
+      if (r) r.onclick = () => { if (confirm("Restart the plan from week 1? Your lesson scores are kept.")) { S.plan = { start: dayKey(), done: {}, weekStarted: {} }; save(); closeSheet(); renderLearn(); } };
+    });
+  }
+  function planFeedback(key) {
+    const [w, i] = key.split(":").map(Number), t = PLAN()[w].tasks[i];
+    runPractice("Assignment feedback", [{
+      type: "write", q: t.label, placeholder: "Paste your story, letter, pitch or notes here",
+      checks: [["At least 50 words", "minWords", 50]], rubric: t.feedback,
+    }], { onWrite: (q, text, score) => { if (score != null && score >= 0.6) { S.plan.done[key] = Date.now(); save(); } } });
+  }
+
   function renderLearn() {
     const L = window.DISPATCH_LESSONS;
     const done = L.filter((l) => S.lessons[l.id]).length;
@@ -1371,7 +1581,8 @@
     const units = [...new Set(L.map((l) => l.unit))];
     const coachOn = !!aiKey();
     view.innerHTML = `
-      <div class="kpis">
+      ${planCardHtml()}
+      <div class="kpis" style="margin-top:12px">
         <div class="kpi"><b>${S.days[dayKey()] || 0}</b><span>read today</span></div>
         <div class="kpi"><b>${streak()}</b><span>day streak</span></div>
         <div class="kpi"><b>${done}/${L.length}</b><span>lessons passed</span></div>
@@ -1546,6 +1757,7 @@
       $("#next").addEventListener("click", () => { i++; step(); });
     }
     function finish() {
+      if (opts.onFinish) opts.onFinish(results);
       const graded = results.filter((r) => r.score != null);
       const pct = graded.length ? Math.round((graded.reduce((n, r) => n + r.score, 0) / graded.length) * 100) : null;
       let line = "";
@@ -1609,6 +1821,7 @@
     if (!qs.length) return toast("Your Wire is still loading. Try again in a moment.");
     runPractice(names[kind], qs, {
       regen: () => drillQs(kind),
+      onFinish: () => { S.drillLog = (S.drillLog || []).concat([{ kind, at: Date.now() }]).slice(-300); save(); },
       onWrite: kind === "lede" ? (q, text, score) => {
         S.drills.unshift({ day: dayKey(), text, words: words(text), score: score == null ? null : Math.round(score * 10) });
         S.drills = S.drills.slice(0, 100); save();
@@ -1794,6 +2007,9 @@
         <label class="f">Mute words: stories with these are hidden<input class="field" id="set-mutes" value="${esc(S.mutes.join(", "))}" placeholder="celebrity, crypto"></label>
       </div>
 
+      <div class="label">Sync across devices</div>
+      <div id="sync-box"></div>
+
       <div class="label">Outlet lean labels</div>
       <label class="toggle" style="margin-bottom:4px"><input type="checkbox" id="set-lean" ${S.showLean !== false ? "checked" : ""}>Show each outlet's approximate political lean on stories</label>
       <p class="small muted" style="margin:0 0 4px">Based on public ratings such as AllSides and Ad Fontes Media. Change any outlet's rating from a story's Coverage screen.${Object.keys(S.leanOverrides || {}).length ? ` You've changed ${Object.keys(S.leanOverrides).length}. <button class="linkish" type="button" id="lean-reset">Reset them</button>` : ""}</p>
@@ -1884,6 +2100,7 @@
       S.desks = S.desks.filter((x) => x.id !== d.id);
       save(); saveCache(); openSettings(); paintLists();
     }));
+    if (window.DispatchSync) window.DispatchSync.mount($("#sync-box"));
     $("#set-lean").addEventListener("change", (e) => { S.showLean = e.target.checked; save(); paintLists(); });
     const lr = $("#lean-reset");
     if (lr) lr.addEventListener("click", () => { S.leanOverrides = {}; save(); openSettings(); paintLists(); });
@@ -1988,6 +2205,16 @@
     if (nb) { S.nb = nb.dataset.nb; save(); renderNotebook(); return; }
     const pf = e.target.closest("[data-pf]");
     if (pf) { S.pitchFilter = pf.dataset.pf; save(); nbPitches(); return; }
+    if (e.target.closest("#plan-start")) { S.plan = { start: dayKey(), done: {}, weekStarted: {} }; save(); renderLearn(); return; }
+    if (e.target.closest("#plan-all")) return openPlan();
+    const pl = e.target.closest("[data-plan-lesson]");
+    if (pl) return openLesson(pl.dataset.planLesson);
+    const pd = e.target.closest("[data-plan-done]");
+    if (pd) { S.plan.done[pd.dataset.planDone] = Date.now(); save(); if (sheet.open) openPlan(); renderLearn(); toast("Nice work"); return; }
+    const pu = e.target.closest("[data-plan-undo]");
+    if (pu) { delete S.plan.done[pu.dataset.planUndo]; save(); if (sheet.open) openPlan(); renderLearn(); return; }
+    const pfb = e.target.closest("[data-plan-feedback]");
+    if (pfb) return planFeedback(pfb.dataset.planFeedback);
     const drill = e.target.closest("[data-drill]");
     if (drill) return startDrill(drill.dataset.drill);
     const les = e.target.closest("[data-lesson]");
@@ -2012,6 +2239,13 @@
       case "cite": if (it) copy(citation(it), "Citation copied"); break;
       case "pitch": if (it) pitchFrom(it); break;
       case "coverage": if (it) openCoverage(it); break;
+      case "watch-story": if (it) {
+        const term = coverageQuery(it.title || clip(it.text, 120)).split(" ").slice(0, 4).join(" ");
+        if (!term) break;
+        const w = { id: uid(), term, nets: { news: true, reddit: true, bluesky: true, mastodon: false, hn: false }, seen: Date.now() };
+        S.watches.unshift(w); S.watchSel = w.id; S.watchMode = "keywords";
+        const ids = syncWatch(w); save(); setTab("watch"); refreshAll(ids); toast("Watching: " + term);
+      } break;
       case "archive": if (it) archiveLink(it.link); break;
       case "more": wireLimit += 120; paintWire(); break;
       case "retry": refreshAll(S.sources.filter((s) => C[s.id] && C[s.id].err).map((s) => s.id)); break;
@@ -2060,15 +2294,34 @@
   $("#refresh-btn").addEventListener("click", () => refreshAll(null, true));
   $("#settings-btn").addEventListener("click", () => openSettings());
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && Date.now() - S.lastRefresh > 15 * 60e3) refreshAll();
+    if (document.visibilityState === "visible" && Date.now() - S.lastRefresh > 5 * 60e3) refreshAll();
   });
+  // Keep breaking news current while the app is open.
+  setInterval(() => { if (document.visibilityState === "visible" && Date.now() - S.lastRefresh > 5 * 60e3) refreshAll(); }, 60e3);
 
   // ---------- start ----------
   $("#mast-date").textContent = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  applyTheme();
-  setTab(S.tab || "wire");
-  if (Date.now() - S.lastRefresh > 10 * 60e3 || !Object.keys(C).length) refreshAll();
-  else paintLists();
+  (async () => {
+    try {
+      const [st, cache] = await Promise.all([idb.get("state"), idb.get("cache")]);
+      if (st && (!S.updatedAt || (st.updatedAt || 0) >= S.updatedAt)) S = upgrade(st);
+      if (cache) C = cache;
+      else { const old = loadJSON(CACHE_KEY); if (old) C = old; }
+      try { localStorage.removeItem(CACHE_KEY); } catch (e) { /* ignore */ }
+      if (!st) save(true); // first run on IndexedDB: copy the localStorage state over
+    } catch (e) { /* IndexedDB unavailable (private browsing): carry on with localStorage */ }
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    applyTheme();
+    setTab(S.tab || "wire");
+    if (Date.now() - S.lastRefresh > 10 * 60e3 || !Object.keys(C).length) refreshAll();
+    else paintLists();
+    if (window.DispatchSync) window.DispatchSync.start();
+  })();
 
-  window.Dispatch = { parseFeed, draftReport, foiaLetter, state: () => S }; // for tests and the console
+  window.Dispatch = {
+    parseFeed, draftReport, foiaLetter, state: () => S, cache: () => C,
+    // used by sync.js
+    replaceState(next) { S = upgrade(next); applyTheme(); save(true); setTab(S.tab || "wire"); },
+    toast, esc,
+  };
 })();

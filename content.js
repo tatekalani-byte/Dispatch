@@ -5,6 +5,18 @@
 // bsky (Bluesky handle), mastodon (tag@instance).
 window.DISPATCH_PACKS = [
   {
+    id: "breaking", name: "Breaking",
+    blurb: "Top stories and the wire services, for what's happening right now.",
+    sources: [
+      ["rss", "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en", "Google News Top Stories"],
+      ["gnews", "site:apnews.com when:1d", "AP"],
+      ["gnews", "site:reuters.com when:1d", "Reuters"],
+      ["gnews", "breaking news when:1h", "Breaking news (all outlets)"],
+      ["rss", "https://feeds.bbci.co.uk/news/rss.xml", "BBC News"],
+      ["rss", "https://feeds.npr.org/1002/rss.xml", "NPR Latest"],
+    ],
+  },
+  {
     id: "investigative", name: "Investigations",
     blurb: "Accountability reporting and the people who do it best.",
     sources: [
@@ -116,7 +128,7 @@ window.DISPATCH_PACKS = [
 ];
 
 // Packs loaded on first run.
-window.DISPATCH_DEFAULT_PACKS = ["investigative", "press", "liberty", "tech", "world", "substack", "community", "social"];
+window.DISPATCH_DEFAULT_PACKS = ["breaking", "investigative", "press", "liberty", "tech", "world", "substack", "community", "social"];
 
 window.DISPATCH_X_SEARCHES = [
   { label: "Breaking news", q: "breaking (news OR update) -filter:replies filter:links" },
@@ -424,4 +436,144 @@ window.DISPATCH_LOADED = [
   ["\\bso-called\\b", "Scare phrase", "Signals doubt without saying why."],
   ["\\b(illegal aliens?|illegals|undocumented immigrants?|pro-life|pro-choice|anti-abortion|abortion rights|gun rights|gun control|death tax|tax relief|climate denier|climate alarmist)\\b", "Contested term", "Each side prefers its own wording. Notice whose term is used."],
   ["\\b(furious|fury|outrage|outraged|livid|seething|panic|panicked|desperate|humiliat\\w*)\\b", "Emotional framing", "Describes feelings the reporter probably can't verify."],
+];
+
+// More lessons, added with the 12-week plan.
+window.DISPATCH_LESSONS.push(
+  {
+    id: "headlines", unit: "Foundations", title: "Writing headlines",
+    body: [
+      "A news headline tells the reader what happened in about 10 words. Write it in **present tense** for things that already happened (*Council approves budget*), use an **active verb**, and put the most important words first.",
+      "Headlines drop most articles (*a*, *an*, *the*) and use numerals. They must be **accurate to the story**: a headline that overpromises breaks trust even if the story is fine.",
+      "Online, the headline is also how people find the story, so use the words a reader would search for. Keep it to about 60 to 70 characters so it isn't cut off. Avoid question headlines; if you knew the answer, you'd say it.",
+    ],
+    takeaways: ["Present tense, active verb.", "Accurate before clever.", "About 60 to 70 characters."],
+    tryit: "Do the Headline rewrite drill in Learn on three stories from your Wire.",
+  },
+  {
+    id: "ap-style", unit: "Craft & career", title: "AP style essentials",
+    body: [
+      "Most U.S. newsrooms follow the **Associated Press Stylebook**, so editors expect it. A few rules cover most of what you'll write:",
+      "**Numbers**: spell out one through nine, use numerals for 10 and up. Ages are always numerals (*a 5-year-old*). Use the % sign with numerals (*5%*). **Dates**: abbreviate Jan., Feb., Aug., Sept., Oct., Nov. and Dec. when used with a date; spell out March through July. Never add *th* or *st* (*Oct. 21*, not *Oct. 21st*). **Times**: *7 p.m.*, not *7:00 PM*.",
+      "**Titles**: capitalize a formal title before a name (*Mayor Ana Ruiz*), lowercase it after (*Ana Ruiz, the mayor*). **Lists**: no comma before the final *and* in a simple series. **States**: spell out state names in the body of a story.",
+    ],
+    takeaways: ["One to nine in words, 10 and up in numerals.", "Oct. 21, not October 21st.", "Title before the name is capitalized."],
+    tryit: "Take your last practice lede and fix every number, date and title to AP style.",
+  },
+  {
+    id: "features", unit: "Craft & career", title: "Feature writing",
+    body: [
+      "Features explain, explore or bring people to life. They often open with an **anecdotal lede**, a short scene with a real person, then widen out in the **nut graf** to say why it matters.",
+      "**Show, don't tell**: instead of *she was dedicated*, write that she unlocked the gym at 7 a.m. every Saturday for 22 years. Specific details and dialogue do the work adjectives can't.",
+      "Common structures: the **hourglass** (news first, then a chronological retelling), **chronological** for a narrative, and **point-by-point** for explainers. End with a **kicker**, often a quote or image that echoes the opening.",
+    ],
+    takeaways: ["Scene, then nut graf.", "Specific details beat adjectives.", "End with a kicker."],
+    tryit: "Rewrite one sentence of your own that tells a quality (*brave*, *busy*) so it shows it instead.",
+  },
+  {
+    id: "editing", unit: "Craft & career", title: "Editing your own copy",
+    body: [
+      "Every story gets at least one more pass than you think it needs. **Read it out loud**: you'll hear clunky sentences and missing words your eyes skip.",
+      "Then do an **accuracy check**: confirm the spelling of every name against a source, re-do every calculation, check every date against a calendar, and make sure each quote matches your notes or recording word for word.",
+      "Finally **cut**: delete *very*, *really*, *in order to* and throat-clearing first sentences. Most drafts get better at about 80% of their length.",
+    ],
+    takeaways: ["Read it aloud.", "Check every name, number and quote.", "Cut 20%."],
+    tryit: "Paste a draft into Draft check in Tools, then fix every flag.",
+  },
+  {
+    id: "numbers", unit: "Reporting", title: "Numbers for journalists",
+    body: [
+      "Numbers make stories credible, and errors in them destroy credibility. Know the difference between a **percentage point** and a **percent**: a rate that rises from 4% to 6% went up 2 percentage points, which is a 50% increase.",
+      "**Median** (the middle value) is usually more honest than the **average** (mean) for money, because a few very large values pull the average up. **Per capita** (per person) lets you compare places of different sizes.",
+      "Context matters: compare to last year, to other places, to the size of the budget. And **correlation isn't causation**: two things rising together doesn't mean one caused the other. Always ask where a number came from.",
+    ],
+    takeaways: ["Points vs. percent.", "Median for money.", "Compare, and ask the source."],
+    tryit: "Find a statistic in a story on your Wire and check it against the original source.",
+  },
+  {
+    id: "polls", unit: "Reporting", title: "Reporting on polls",
+    body: [
+      "Before reporting a poll, find out **who did it** and who paid for it, **who was asked** (all adults, registered voters or likely voters), **how many** people, **when**, and **how the questions were worded**.",
+      "Every poll has a **margin of error**. If a candidate leads 48% to 46% and the margin is plus or minus 3 points, the race is **too close to call**; don't write that one candidate is ahead. The margin applies to each number, so the gap has to be larger still to be a real lead.",
+      "One poll is a snapshot. Averages of many polls are more reliable, and changes within the margin of error aren't trends.",
+    ],
+    takeaways: ["Who, how many, when, what wording.", "Inside the margin = too close to call.", "One poll is a snapshot."],
+    tryit: "Find a poll in the news and write down its sample, dates, margin of error and sponsor.",
+  },
+  {
+    id: "meetings", unit: "Government & courts", title: "Covering a public meeting",
+    body: [
+      "Read the **agenda and the meeting packet** before you go; they're usually posted online days ahead. That's where the real story is often hiding, in a contract, a budget line or a consent item.",
+      "At the meeting, record **every vote and the count** (5-2, with who voted which way), get exact quotes, and note what residents said in public comment. The **consent agenda** passes many items in one vote without discussion; scan it closely.",
+      "Lead with **what was decided and what it means for residents**, not with the fact that a meeting happened. Afterward, call the people affected and anyone who voted no.",
+    ],
+    takeaways: ["Read the packet first.", "Get every vote and count.", "Lead with the decision's impact."],
+    tryit: "Find your city council's next agenda. Add the agenda page to Watch, Pages.",
+  },
+  {
+    id: "courts", unit: "Government & courts", title: "Covering courts",
+    body: [
+      "**Criminal** cases are brought by the government; a defendant is found **guilty** or **not guilty**. **Civil** cases are disputes between parties; a defendant is found **liable** or not, and a plaintiff may win damages. Don't mix the terms.",
+      "In criminal cases, people are **charged** (by complaint or a grand jury **indictment**), **arraigned**, and enter a **plea**. AP style: they *pleaded* not guilty (not *pled*), and write *not guilty* rather than *innocent*. Until a verdict, a person is **accused**, not guilty.",
+      "Read the actual filings. Federal records are on PACER, many are free on CourtListener, and state courts have their own systems. Court records are generally protected for fair, accurate reporting, but attribute every allegation.",
+    ],
+    takeaways: ["Guilty (criminal) vs. liable (civil).", "Pleaded, not pled.", "Read the filings, attribute allegations."],
+    tryit: "Search a case in Tools, Search everywhere, Court records, and summarize where it stands in three sentences.",
+  },
+);
+
+// The 12-week plan. Each task is one of:
+//   pass: a lesson's practice, done when you score 70% or more
+//   drill: a daily drill in Learn (lede, values, headline)
+//   habit: read stories on your Wire on 5 different days that week
+//   assignment: real-world reporting, which you mark done (and can get AI feedback on)
+window.DISPATCH_PLAN = [
+  { title: "What makes news", goal: "Learn to spot a story and why it matters.", tasks: [
+    { kind: "pass", lesson: "news-values" }, { kind: "drill", drill: "values", label: "News values drill on real stories" }, { kind: "habit" },
+    { kind: "assignment", id: "w1a", label: "Read three local news stories. For each, write down its two strongest news values and who it affects.", feedback: "List three local stories with their two strongest news values and who each affects. A strong answer names specific values (impact, timeliness, proximity, prominence, conflict, novelty, human interest) and explains why each fits." },
+  ] },
+  { title: "Ledes and the inverted pyramid", goal: "Write the top of a news story.", tasks: [
+    { kind: "pass", lesson: "pyramid" }, { kind: "pass", lesson: "ledes" }, { kind: "drill", drill: "lede", label: "Lede drill, three times this week" }, { kind: "habit" },
+    { kind: "assignment", id: "w2a", label: "Find a press release from a local agency or company and turn it into a 300-word news story.", feedback: "A 300-word news story written from a press release. A strong story leads with the news (not the announcement), uses the inverted pyramid, attributes claims to the organization, and cuts promotional language." },
+  ] },
+  { title: "Nut grafs and features", goal: "Tell a story about a person that means something bigger.", tasks: [
+    { kind: "pass", lesson: "nutgraf" }, { kind: "pass", lesson: "features" }, { kind: "habit" },
+    { kind: "assignment", id: "w3a", label: "Write a 600-word profile of someone in your community: open with a scene, add a nut graf, end with a kicker.", feedback: "A 600-word profile. A strong one opens with a specific scene, has a clear nut graf by the fourth paragraph, shows rather than tells, uses quotes well and ends with a kicker." },
+  ] },
+  { title: "Interviews and quotes", goal: "Get people talking, and quote them fairly.", tasks: [
+    { kind: "pass", lesson: "interviewing" }, { kind: "pass", lesson: "attribution" }, { kind: "pass", lesson: "terms" }, { kind: "habit" },
+    { kind: "assignment", id: "w4a", label: "Interview two people about one local issue (use Tools, Interview prep). Write 400 words using quotes from both.", feedback: "A 400-word story built on interviews with two people. A strong one uses open-ended material, attributes with 'said', quotes the vivid parts and paraphrases facts, and fairly represents both sources." },
+  ] },
+  { title: "Headlines and AP style", goal: "Polish copy the way an editor expects.", tasks: [
+    { kind: "pass", lesson: "headlines" }, { kind: "pass", lesson: "ap-style" }, { kind: "drill", drill: "headline", label: "Headline rewrite drill" }, { kind: "habit" },
+    { kind: "assignment", id: "w5a", label: "Edit your week 2 story to AP style and write three possible headlines for it.", feedback: "A story edited to AP style plus three headlines. Check numbers, dates, titles and attribution against AP style, and judge whether each headline is accurate, active, present tense and under 70 characters." },
+  ] },
+  { title: "Editing and accuracy", goal: "Catch your own mistakes before anyone else does.", tasks: [
+    { kind: "pass", lesson: "editing" }, { kind: "habit" },
+    { kind: "assignment", id: "w6a", label: "Fact-check one of your stories line by line: list every name, number, date and quote and how you confirmed each.", feedback: "A line-by-line fact-check list. A strong one covers every name, number, date and quote, and says exactly how each was confirmed (source document, recording, calendar) rather than 'checked'." },
+  ] },
+  { title: "Numbers and polls", goal: "Report numbers without getting them wrong.", tasks: [
+    { kind: "pass", lesson: "numbers" }, { kind: "pass", lesson: "polls" }, { kind: "habit" },
+    { kind: "assignment", id: "w7a", label: "Find a statistic or poll in the news. Trace it to its original source and write what the story got right or wrong.", feedback: "An analysis of one statistic or poll traced to its original source. A strong answer identifies the source, sample or method, margin of error where relevant, and whether the news story represented it accurately." },
+  ] },
+  { title: "Verification and ethics", goal: "Know what's true, and treat people fairly.", tasks: [
+    { kind: "pass", lesson: "verification" }, { kind: "pass", lesson: "ethics" }, { kind: "habit" },
+    { kind: "assignment", id: "w8a", label: "Pick a viral image or claim. Verify it with Tools, Verify, and write up what you found and how.", feedback: "A verification write-up of a viral image or claim. A strong one follows SIFT, traces to the original source, uses reverse image search or archives, and clearly states what is confirmed, false or unknown." },
+  ] },
+  { title: "Public records and the law", goal: "Get documents, and stay out of legal trouble.", tasks: [
+    { kind: "pass", lesson: "records" }, { kind: "pass", lesson: "libel" }, { kind: "habit" },
+    { kind: "assignment", id: "w9a", label: "File a real public records request with the letter tool in Tools. Add the deadline to your Notebook as a pitch.", feedback: "A public records request letter. A strong one names the specific records, office and date range, cites the right law, asks for electronic copies and a fee waiver, and is concise." },
+  ] },
+  { title: "Covering government", goal: "Turn a public meeting into a story readers need.", tasks: [
+    { kind: "pass", lesson: "meetings" }, { kind: "habit" },
+    { kind: "assignment", id: "w10a", label: "Attend or livestream a city council or school board meeting. Write 400 words within 2 hours of it ending.", feedback: "A 400-word meeting story written on deadline. A strong one leads with the most important decision and its impact on residents, includes vote counts, quotes officials and the public, and doesn't lead with the meeting itself." },
+  ] },
+  { title: "Courts and staying safe", goal: "Report on the justice system accurately.", tasks: [
+    { kind: "pass", lesson: "courts" }, { kind: "pass", lesson: "safety" }, { kind: "habit" },
+    { kind: "assignment", id: "w11a", label: "Look up a local court case (Tools, Search everywhere, Court records). Summarize where it stands in 250 words.", feedback: "A 250-word court case summary. A strong one uses correct terms (criminal vs. civil, charged, pleaded, liable), attributes every allegation to the filing, and explains what happens next." },
+  ] },
+  { title: "Your beat and your first pitch", goal: "Get published.", tasks: [
+    { kind: "pass", lesson: "beat" }, { kind: "pass", lesson: "pitching" }, { kind: "pass", lesson: "clips" }, { kind: "habit" },
+    { kind: "assignment", id: "w12a", label: "Choose your beat and pitch your best story idea to a real outlet: a student paper, local site or newsletter.", feedback: "A pitch email to an editor. A strong one is under 250 words, leads with a specific story (not a topic), explains why now and why you, notes reporting done, and proposes length and timing." },
+  ] },
 ];

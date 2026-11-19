@@ -76,7 +76,7 @@
   .mast{ max-width:760px; margin:0 auto; padding:18px 16px 10px; display:flex; align-items:flex-end; gap:12px; }
   .mast-title{ flex:1; min-width:0; }
   .mast-date{ margin:0 0 2px; font-size:.7rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); font-weight:700; }
-  .mast h1{ font-size:2rem; letter-spacing:-.01em; }
+  .mast h1{ font-size:2.4rem; letter-spacing:-.02em; font-weight:700; }
   .mast h1 span{ color:var(--accent); }
   .icon-btn{ width:40px; height:40px; border-radius:50%; border:1px solid var(--line); background:var(--surface); display:grid; place-items:center; color:var(--text); flex-shrink:0; }
   .icon-btn:hover{ border-color:var(--muted); }
@@ -150,18 +150,47 @@
   .story-meta{ grid-column:1/-1; font-size:.72rem; letter-spacing:.04em; text-transform:uppercase; font-weight:800; color:var(--muted); display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
   .story-meta .src{ color:var(--accent); }
   .story-meta .alert{ background:var(--mark); color:var(--text); border-radius:4px; padding:1px 5px; letter-spacing:0; text-transform:none; }
-  .story-title{ font-family:"Newsreader",Georgia,serif; font-size:1.22rem; font-weight:600; line-height:1.22; text-decoration:none; display:block; }
+  .story-title{ font-family:"Newsreader",Georgia,serif; font-size:1.28rem; font-weight:650; line-height:1.2; text-decoration:none; display:block; letter-spacing:-.005em; }
   .story-title:hover{ text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }
   .story.read .story-title{ color:var(--muted); font-weight:500; }
   .story-sum{ margin:2px 0 0; color:var(--muted); font-size:.88rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-  .story-img{ width:84px; height:84px; object-fit:cover; border-radius:8px; grid-row:2; grid-column:2; background:var(--surface-2); }
+  .story-img{ width:104px; height:104px; object-fit:cover; border-radius:12px; grid-row:2; grid-column:2; background:var(--surface-2); box-shadow:0 0 0 1px var(--line); }
+  @media (min-width:700px){ .story-img{ width:150px; height:100px; } }
+  .story-meta .logo{ width:16px; height:16px; border-radius:4px; background:#fff; box-shadow:0 0 0 1px var(--line); }
+  .story.lead{ grid-template-columns:1fr; border-bottom:2px solid var(--text); }
+  .lead-img{ display:block; margin:0 0 10px; border-radius:14px; overflow:hidden; aspect-ratio:16/9; background:var(--surface-2); }
+  .lead-img img{ width:100%; height:100%; object-fit:cover; display:block; transition:transform .4s; }
+  .lead-img:hover img{ transform:scale(1.02); }
+  .story.lead .story-title{ font-size:1.7rem; line-height:1.12; letter-spacing:-.01em; }
+  .story.lead .story-sum{ -webkit-line-clamp:3; font-size:.95rem; }
+
+  /* Breaking */
+  .breaking{ margin:12px 0 6px; border-radius:16px; overflow:hidden; background:linear-gradient(180deg, #A3221A, #7E1711); color:#FFF4F0; box-shadow:0 10px 30px -14px rgba(126,23,17,.7); }
+  .breaking-head{ display:flex; align-items:center; gap:10px; padding:12px 16px 8px; font-weight:900; letter-spacing:.14em; text-transform:uppercase; font-size:.8rem; }
+  .breaking-head .muted{ color:rgba(255,244,240,.75); letter-spacing:0; text-transform:none; font-weight:600; margin-left:auto; }
+  .pulse{ width:10px; height:10px; border-radius:50%; background:#fff; box-shadow:0 0 0 0 rgba(255,255,255,.8); animation:pulse 1.6s infinite; }
+  @keyframes pulse{ 70%{ box-shadow:0 0 0 10px rgba(255,255,255,0); } 100%{ box-shadow:0 0 0 0 rgba(255,255,255,0); } }
+  .break-item{ padding:10px 16px 12px; border-top:1px solid rgba(255,255,255,.15); }
+  .break-item.top{ border-top:0; }
+  .break-img{ width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:10px; margin-bottom:8px; display:block; }
+  .break-meta{ font-size:.72rem; font-weight:700; color:rgba(255,244,240,.8); text-transform:uppercase; letter-spacing:.05em; }
+  .break-title{ display:block; color:#fff; text-decoration:none; font-family:"Newsreader",Georgia,serif; font-weight:700; font-size:1.15rem; line-height:1.2; margin-top:2px; }
+  .break-item.top .break-title{ font-size:1.5rem; }
+  .break-title:hover{ text-decoration:underline; text-underline-offset:3px; }
+  .break-more{ margin-top:6px; font-size:.82rem; }
+  .break-more summary{ cursor:pointer; font-weight:700; color:rgba(255,244,240,.9); }
+  .break-more ul{ margin:6px 0 0; padding-left:16px; display:flex; flex-direction:column; gap:4px; }
+  .break-more a{ color:#fff; }
+  .break-more .muted{ color:rgba(255,244,240,.7); }
+  .breaking .act{ color:rgba(255,244,240,.85); }
+  .breaking .act:hover{ background:rgba(255,255,255,.12); color:#fff; }
   .story-actions{ grid-column:1/-1; display:flex; flex-wrap:wrap; gap:2px; margin:4px 0 0 -8px; }
   .act{ border:0; background:none; text-decoration:none; color:var(--muted); display:inline-flex; align-items:center; gap:5px; padding:6px 8px; border-radius:8px; font-size:.76rem; font-weight:700; }
   .act:hover{ background:var(--surface-2); color:var(--text); }
   .act[aria-pressed="true"]{ color:var(--accent); }
   .act[aria-pressed="true"] svg{ fill:currentColor; }
   mark{ background:var(--mark); color:inherit; border-radius:2px; padding:0 1px; }
-  .group-h{ font-family:"Newsreader",Georgia,serif; font-size:.95rem; font-style:italic; color:var(--muted); margin:18px 0 0; padding-bottom:4px; border-bottom:2px solid var(--text); }
+  .group-h{ font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; font-weight:900; color:var(--accent); margin:22px 0 0; padding-bottom:6px; border-bottom:2px solid var(--text); }
   .errors{ font-size:.78rem; }
   .errors summary{ cursor:pointer; color:var(--accent); font-weight:700; }
   .errors li{ margin:4px 0; color:var(--muted); }
@@ -260,6 +289,22 @@
   .lean-pick{ border:1px solid var(--line); background:var(--surface); border-radius:8px; font-size:.72rem; padding:2px 4px; max-width:140px; color:var(--muted); }
   .loaded{ font-size:.7rem; font-weight:700; padding:2px 7px; border-radius:999px; background:var(--accent-soft); color:var(--accent); cursor:help; }
   mark.loaded-mark{ background:var(--accent-soft); color:var(--accent); }
+
+  /* Plan */
+  .plan-card{ background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 12px 30px -22px var(--shadow); }
+  .plan-card .eyebrow{ font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; font-weight:900; color:var(--accent); }
+  .plan-card h2{ font-size:1.5rem; margin:4px 0 4px; }
+  .plan-card > p{ margin:0 0 12px; color:var(--muted); font-size:.92rem; }
+  .plan-weeks{ margin:0 0 14px; padding-left:0; list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:.82rem; }
+  .plan-weeks b{ color:var(--accent); margin-right:4px; }
+  @media (max-width:420px){ .plan-weeks{ grid-template-columns:1fr; } }
+  .plan-tasks{ list-style:none; margin:0 0 10px; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .plan-task{ display:flex; gap:10px; align-items:flex-start; font-size:.92rem; }
+  .plan-task .dot{ width:22px; height:22px; border-radius:50%; border:2px solid var(--line); display:grid; place-items:center; flex-shrink:0; color:var(--on-accent); margin-top:1px; }
+  .plan-task.done .dot{ background:var(--good); border-color:var(--good); }
+  .plan-task.done .grow > div:first-child{ color:var(--muted); text-decoration:line-through; text-decoration-color:var(--line); }
+  .plan-week{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .plan-week summary{ cursor:pointer; }
 
   /* Practice */
   .q{ font-size:1.25rem; margin:0 0 10px; }
@@ -387,6 +432,7 @@
 <script src="content.js"></script>
 <script src="practice.js"></script>
 <script src="dispatch.js"></script>
+<script src="sync.js"></script>
 <script src="install.js"></script>
 </body>
 </html>

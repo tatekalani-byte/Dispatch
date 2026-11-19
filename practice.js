@@ -618,3 +618,168 @@ window.DISPATCH_PRACTICE = {
 
 // Wire practice uses real stories from your feeds.
 window.DISPATCH_NEWS_VALUES = ["Timeliness", "Impact", "Proximity", "Prominence", "Conflict", "Novelty", "Human interest"];
+
+Object.assign(window.DISPATCH_PRACTICE, {
+  headlines: [
+    {
+      type: "choice", q: "Which is the best news headline?",
+      options: ["City Council Has Meeting About Water Rates", "Council raises water rates 12% starting in January", "Will your water bill go up? Council weighs in", "Water rates were raised by the council"],
+      answer: 1, why: "Present tense, active verb, the specific news and the number, under 60 characters. The others are vague, a question, or passive.",
+    },
+    {
+      type: "spot", q: "Tap the headline that breaks the most rules.",
+      parts: ["Storm knocks out power to 40,000 homes", "Power was knocked out by a storm for many homes in the area yesterday", "Governor signs school-funding bill"],
+      answer: 1, why: "Passive voice, past tense, vague (\"many homes,\" \"the area\") and too long. Rewrite: \"Storm cuts power to 40,000 homes.\"",
+    },
+    {
+      type: "choice", q: "A story says a study found a possible link between a food additive and headaches in mice. Which headline is accurate?",
+      options: ["Food additive causes headaches", "Study in mice links food additive to headaches", "Scientists warn: this additive is ruining your health", "Is your snack giving you headaches?"],
+      answer: 1, why: "It says what the study found (a link), in what (mice). The others claim causation or hype a finding the story doesn't support.",
+    },
+    {
+      type: "write", q: "Write a headline for this story, under 70 characters.",
+      passage: "The county school board voted 5-2 Tuesday to close Lincoln and Hayes elementary schools next fall, reassigning 640 students to save $3.1 million a year.",
+      placeholder: "Your headline",
+      checks: [["Under 70 characters", "maxChars", 70], ["Includes a number", "has", "\\d"], ["Not a question", "not", "\\?\\s*$"], ["No passive voice", "noPassive"]],
+      model: "School board votes to close 2 elementary schools, moving 640 students",
+      rubric: "Accurate, specific (two schools, 640 students or $3.1 million), present tense, active verb, under 70 characters, no question.",
+    },
+  ],
+  "ap-style": [
+    {
+      type: "choice", q: "Which is correct AP style?",
+      options: ["The meeting is October 21st at 7:00 PM.", "The meeting is Oct. 21 at 7 p.m.", "The meeting is Oct. 21st at 7 PM.", "The meeting is October 21 at 7:00 p.m."],
+      answer: 1, why: "Abbreviate October with a date, no \"st,\" and write times as 7 p.m.",
+    },
+    {
+      type: "choice", q: "Which is correct AP style?",
+      options: ["Five people and 12 dogs were rescued.", "5 people and twelve dogs were rescued.", "Five people and twelve dogs were rescued.", "5 people and 12 dogs were rescued."],
+      answer: 0, why: "Spell out one through nine, numerals for 10 and up. (A number that starts a sentence is spelled out too, which is why this one works.)",
+    },
+    {
+      type: "spot", q: "Tap the sentence with an AP style error.",
+      parts: ["Mayor Ana Ruiz said the plan would cost $2 million.", "Ana Ruiz, the Mayor, said the plan would cost $2 million.", "The mayor, Ana Ruiz, said the plan would cost $2 million."],
+      answer: 1, why: "A title after a name is lowercase: \"Ana Ruiz, the mayor.\" It's capitalized only right before the name.",
+    },
+    {
+      type: "choice", q: "How should you write a 7-year-old's age?",
+      options: ["a seven-year-old girl", "a 7-year-old girl", "a seven year old girl", "a 7 year old girl"],
+      answer: 1, why: "Ages are always numerals in AP style, hyphenated when used before a noun.",
+    },
+  ],
+  features: [
+    {
+      type: "choice", q: "Which sentence shows rather than tells?",
+      options: ["Mr. Ortiz is a very dedicated coach.", "Mr. Ortiz has unlocked the gym at 7 a.m. every Saturday for 22 years.", "Everyone agrees Mr. Ortiz is amazing.", "Mr. Ortiz really loves coaching."],
+      answer: 1, why: "A specific, checkable detail lets readers conclude he's dedicated without being told.",
+    },
+    {
+      type: "choice", q: "What is a kicker?",
+      options: ["The first sentence of a feature", "A strong ending, often a quote or image that echoes the opening", "A correction at the bottom of a story", "The headline's second line"],
+      answer: 1, why: "Features end with a kicker that leaves the reader with something, often circling back to the opening scene.",
+    },
+    {
+      type: "order", q: "Put the parts of a typical feature opening in order.",
+      items: ["A scene with one person (anecdotal lede)", "The nut graf: why this matters, why now", "Evidence and voices that support the nut graf", "Background and history", "A kicker that echoes the opening"],
+      why: "Scene, then the point, then the reporting that proves it, then context, then a strong ending.",
+    },
+  ],
+  editing: [
+    {
+      type: "multi", q: "Which should you check against a source before publishing?",
+      options: ["Spelling of every name", "Every calculation", "Dates and days of the week", "Each direct quote, word for word", "Your favorite adjective", "Titles and job descriptions"],
+      answer: [0, 1, 2, 3, 5], why: "Names, math, dates, quotes and titles are where most corrections come from.",
+    },
+    {
+      type: "write", q: "Cut this sentence to 15 words or fewer without losing the facts.",
+      passage: "At this point in time, it is very important to note that the city council, in order to save money, actually voted to completely eliminate the downtown shuttle program.",
+      placeholder: "Your edit",
+      checks: [["15 words or fewer", "maxWords", 15], ["Keeps the shuttle", "has", "shuttle"], ["No filler", "not", "\\b(very|actually|in order to|at this point in time|completely)\\b"]],
+      model: "The city council voted to eliminate the downtown shuttle to save money.",
+      rubric: "Keeps who (council), what (eliminated the downtown shuttle) and why (save money), drops filler, 15 words or fewer.",
+    },
+    {
+      type: "choice", q: "Your story says the meeting was \"Tuesday, Oct. 22.\" What should you do?",
+      options: ["Nothing, it looks fine", "Check a calendar to confirm Oct. 22 is a Tuesday", "Delete the date", "Ask a reader"],
+      answer: 1, why: "Date and day mismatches are a classic error. Always check the calendar.",
+    },
+  ],
+  numbers: [
+    {
+      type: "choice", q: "Unemployment rose from 4% to 6%. Which is correct?",
+      options: ["It rose 2%.", "It rose 2 percentage points, a 50% increase.", "It rose 50 percentage points.", "It tripled."],
+      answer: 1, why: "The difference between two percentages is percentage points (6 - 4 = 2). The relative change is 2/4 = 50%.",
+    },
+    {
+      type: "choice", q: "In a town, nine people earn $40,000 and one earns $2 million. Which best describes a typical income?",
+      options: ["The average, $236,000", "The median, $40,000", "The total, $2.36 million", "The top income"],
+      answer: 1, why: "One very large value drags the average up. The median shows what's typical.",
+    },
+    {
+      type: "choice", q: "City A had 50 burglaries, City B had 200. City A has 10,000 residents, City B has 100,000. Which had the higher burglary rate?",
+      options: ["City B", "City A", "They're the same", "You can't tell"],
+      answer: 1, why: "Per 1,000 residents: City A has 5, City B has 2. Raw counts mislead when populations differ.",
+    },
+    {
+      type: "choice", q: "A study finds towns with more coffee shops have higher incomes. What can you write?",
+      options: ["Coffee shops make towns richer.", "Towns with more coffee shops tend to have higher incomes, the study found.", "Rich people cause coffee shops.", "Coffee boosts the economy."],
+      answer: 1, why: "It's a correlation. Report the relationship without claiming one causes the other.",
+    },
+  ],
+  polls: [
+    {
+      type: "choice", q: "A poll shows Smith 48%, Jones 46%, margin of error plus or minus 3 points. How should you report it?",
+      options: ["Smith leads", "Jones is losing", "The race is too close to call", "Smith will win"],
+      answer: 2, why: "The 2-point gap is within the margin of error, so neither candidate is clearly ahead.",
+    },
+    {
+      type: "multi", q: "What should you find out before reporting a poll?",
+      options: ["Who paid for it", "How many people were asked", "Whether they were adults, registered or likely voters", "The exact question wording", "When it was taken", "The pollster's favorite candidate"],
+      answer: [0, 1, 2, 3, 4], why: "Sponsor, sample size, population, wording and dates all affect what a poll can tell you.",
+    },
+    {
+      type: "choice", q: "Which is usually most reliable?",
+      options: ["One new poll with a surprising result", "An average of many recent polls", "An online poll anyone can vote in", "A poll released by a campaign"],
+      answer: 1, why: "Averages smooth out the noise of single polls. Open online polls and campaign polls aren't scientific or independent.",
+    },
+  ],
+  meetings: [
+    {
+      type: "choice", q: "When should you read a meeting's agenda packet?",
+      options: ["Never, just show up", "Before the meeting", "Only if something exciting happens", "After you file"],
+      answer: 1, why: "Packets are posted days ahead and often hold the real story: contracts, budgets, consent items.",
+    },
+    {
+      type: "choice", q: "What is a consent agenda?",
+      options: ["Items residents agree to", "A group of items approved in one vote without discussion", "The list of speakers", "A closed-door session"],
+      answer: 1, why: "Many items pass together with no debate, which is why reporters scan them closely.",
+    },
+    {
+      type: "spot", q: "Tap the strongest lede for a council meeting story.",
+      parts: ["The city council met Tuesday night at City Hall.", "The city council voted 4-3 Tuesday to cut library hours by a third starting in March, saving $800,000.", "There was a lot of debate at Tuesday's council meeting."],
+      answer: 1, why: "It leads with the decision, the vote, the impact and when it takes effect.",
+    },
+  ],
+  courts: [
+    {
+      type: "choice", q: "In a civil lawsuit, a defendant who loses is found:",
+      options: ["Guilty", "Liable", "Convicted", "Indicted"],
+      answer: 1, why: "\"Guilty\" and \"convicted\" are criminal terms. Civil defendants are found liable.",
+    },
+    {
+      type: "choice", q: "Which is correct AP style?",
+      options: ["He pled not guilty.", "He pleaded innocent.", "He pleaded not guilty.", "He plead not guilty."],
+      answer: 2, why: "AP uses \"pleaded,\" and \"not guilty\" rather than \"innocent.\"",
+    },
+    {
+      type: "choice", q: "Before a verdict, how should you describe someone charged with a crime?",
+      options: ["The killer", "The suspect who did it", "Accused of, or charged with, the crime", "The guilty party"],
+      answer: 2, why: "Everyone is presumed innocent. Attribute: \"charged with,\" \"accused of,\" \"according to the complaint.\"",
+    },
+    {
+      type: "order", q: "Put these steps of a typical criminal case in order.",
+      items: ["Arrest", "Charges filed (complaint or indictment)", "Arraignment and plea", "Trial or plea deal", "Sentencing, if convicted"],
+      why: "Arrest, charge, arraignment, resolution, then sentencing.",
+    },
+  ],
+});
